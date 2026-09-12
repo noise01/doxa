@@ -15,7 +15,7 @@ the ledger contract tests.
 
 import pytest
 
-from endoxa.governance import HELD, UNRESOLVED, LedgerOp, reconstruct_view
+from endoxa.governance import HELD, UNRESOLVED, BeliefState, LedgerOp, compare_to_state, reconstruct_view
 
 
 def _op(kind: str, target: str, **fields: object) -> LedgerOp:
@@ -164,3 +164,80 @@ class TestRules:
         )
         assert view["mem_2"].target_kind == "rule"
         assert view["mem_2"].confidence == 0.0
+
+
+def _confirmed_once() -> dict[str, BeliefState]:
+    """Build a belief the ledger has booked one corroboration for."""
+    return reconstruct_view(
+        [
+            _op("assert", "mortal(socrates)", truth_value=True, confidence=0.9, actor="user"),
+            _op("confirm", "mortal(socrates)", reason="corroboration", origin_event_id="e1"),
+        ],
+    )
+
+
+def _node(state: BeliefState, *, evidence_for: int, evidence_against: int) -> dict[str, object]:
+    """Build a host node agreeing with ``state`` on truth and credence, and only on those."""
+    return {
+        "truth_value": state.truth_value,
+        "confidence": state.confidence,
+        "evidence_for": evidence_for,
+        "evidence_against": evidence_against,
+    }
+
+
+class TestComparingToTheHostsState:
+    """What ``unattributed`` says beyond how many.
+
+    The count was the whole output until the line below existed: a target whose
+    evidence tally disagreed was counted and named nowhere. A consumer reading
+    the number *during* a run could not then ask which belief it was, and it
+    could not ask afterwards either -- the belief store is a working set, so by
+    the end of a run the target has usually paged out and is counted in
+    ``missing_from_state`` instead. The count is a lower bound on a question
+    nobody could go on to answer.
+    """
+
+    def test_a_target_whose_tally_disagrees_is_named_with_both_sides(self):
+        view = _confirmed_once()
+        state = view["mortal(socrates)"]
+        result = compare_to_state(view, {"mortal(socrates)": _node(state, evidence_for=0, evidence_against=0)})
+        assert result.unattributed == 1
+        assert result.details == ("unattributed mortal(socrates): ledger=(1,0) beliefs=(0,0)",)
+
+    def test_the_ledger_holding_less_is_named_too(self):
+        # The test is a disagreement, not an inequality: a host node holding
+        # more than the ledger can account for is the case the column exists for.
+        view = _confirmed_once()
+        state = view["mortal(socrates)"]
+        result = compare_to_state(view, {"mortal(socrates)": _node(state, evidence_for=1, evidence_against=3)})
+        assert result.details == ("unattributed mortal(socrates): ledger=(1,0) beliefs=(1,3)",)
+
+    def test_the_line_opens_with_the_column_it_was_counted_in(self):
+        # A consumer selects the column it cares about by prefix, so the word
+        # has to be the column's own and has to come first.
+        view = _confirmed_once()
+        state = view["mortal(socrates)"]
+        result = compare_to_state(view, {"mortal(socrates)": _node(state, evidence_for=0, evidence_against=0)})
+        assert [line for line in result.details if line.startswith("unattributed ")] == list(result.details)
+        assert not [line for line in result.details if line.startswith("confidence ")]
+
+    def test_an_agreeing_tally_writes_no_line(self):
+        # Without this the test above passes on an instrument that names every
+        # target it compares, which is not the same instrument.
+        view = _confirmed_once()
+        state = view["mortal(socrates)"]
+        result = compare_to_state(view, {"mortal(socrates)": _node(state, evidence_for=1, evidence_against=0)})
+        assert result.unattributed == 0
+        assert result.details == ()
+
+    def test_an_unattributed_target_is_not_also_compared_on_credence(self):
+        # The tally disagreeing means the credence cannot be read as agreeing or
+        # not, so the target leaves before the credence test and carries exactly
+        # one line rather than two.
+        view = _confirmed_once()
+        state = view["mortal(socrates)"]
+        node = _node(state, evidence_for=0, evidence_against=0) | {"confidence": 0.1}
+        result = compare_to_state(view, {"mortal(socrates)": node})
+        assert result.confidence_breaks == 0
+        assert len(result.details) == 1

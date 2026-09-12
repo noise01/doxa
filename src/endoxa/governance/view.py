@@ -152,12 +152,23 @@ class ViewEquivalence:
             Note the test is a disagreement, not an inequality: the ledger
             holding *more* than the belief store lands here too, which is what makes
             the second case visible at all.
+
+            **Which target it was is in** ``details``. The count alone cannot
+            tell the two cases above apart, and a caller that reads the count
+            during a run and then goes looking afterwards will not find the
+            answer: the belief store is a working set, so by the time the run
+            ends the target has usually paged out and lands in
+            ``missing_from_state`` instead.
         missing_from_state: Targets the ledger knows that the belief store no longer
             has -- paged out to LTM or evicted. Excluded from the
             comparison rather than counted as breakage, and reported so the
             exclusion is never invisible.
         details: Human-readable lines for the disagreements, for a failing test
-            or a diagnostic run to print.
+            or a diagnostic run to print. One line per disagreeing target,
+            opening with the word for the column it was counted in --
+            ``truth ``, ``unattributed `` or ``confidence `` -- so a caller can
+            select the column it cares about by prefix. Each line then names the
+            target and both sides' values.
     """
 
     compared: int = 0
@@ -412,8 +423,13 @@ def compare_to_state(
         if held_truth != state.truth_value:
             truth_breaks += 1
             details.append(f"truth {target}: ledger={state.truth_value} beliefs={held_truth}")
-        if _held_evidence(node) != (state.evidence_for, state.evidence_against):
+        held_evidence = _held_evidence(node)
+        if held_evidence != (state.evidence_for, state.evidence_against):
             unattributed += 1
+            details.append(
+                f"unattributed {target}: ledger=({state.evidence_for},{state.evidence_against}) "
+                f"beliefs=({held_evidence[0]},{held_evidence[1]})"
+            )
             continue
         held_confidence = node.get("confidence")
         if not _confidence_agrees(state.confidence, held_confidence):

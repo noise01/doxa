@@ -8,6 +8,26 @@ not a promise.
 
 ### Added
 
+- **`compare_to_state` names the target it counted as `unattributed`.** The
+  column had a count and no line: a target whose evidence tally disagreed was
+  counted and named nowhere, while `truth` and `confidence` each wrote a line
+  naming the target and both sides. A caller reading the count *during* a run
+  could not go on to ask which belief it was, and it could not ask afterwards
+  either — the belief store a caller compares against is a working set, so by
+  the end of a run the target has usually paged out and is counted in
+  `missing_from_state` instead. The count was a lower bound on a question
+  nobody could then answer.
+
+  The line joins the other two in `details`, in the same shape, opening with the
+  name of the column it was counted in — `unattributed <target>:
+  ledger=(for,against) beliefs=(for,against)` — so a caller selects a column by
+  prefix. Nothing else moved: the counts, the exclusions and the early exit past
+  the credence test are unchanged, and a target whose tally agrees still writes
+  no line.
+
+  `compare_to_state` also gets its first tests in this repository. It had none;
+  what exercised it lived in a consumer this package cannot see.
+
 - **`governance.provenance` is back, exported, and tested — the names only.**
   0.2.0 removed it under a rule worth keeping: exported by nothing, imported by
   nothing, tested by nothing, 118 lines on no execution path. Two of those three
