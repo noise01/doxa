@@ -8,6 +8,8 @@ parse rather than at import -- see that module for why.
 
 from endoxa.solver.ast.expr import App, BoundVar, Const, Expr, Quantifier, Var
 
+_BINARY_ARITY = 2
+
 
 def parse_fof(input_str: str) -> tuple[str, str, Expr]:
     """Parse one TPTP ``fof`` annotated formula into ``(name, role, formula)``.
@@ -54,13 +56,15 @@ def to_tptp(expr: Expr) -> str:
 def _app_to_tptp(expr: App) -> str:
     name = expr.decl.name
     if name == "And":
-        return f"({to_tptp(expr.args[0])} & {to_tptp(expr.args[1])})"
-    if name == "Or":
+        return "(" + " & ".join(to_tptp(arg) for arg in expr.args) + ")"
+    if name == "Or" and len(expr.args) == _BINARY_ARITY:
         lhs = expr.args[0]
         rhs = expr.args[1]
         if isinstance(lhs, App) and lhs.decl.name == "Not":
             return f"({to_tptp(lhs.args[0])} => {to_tptp(rhs)})"
         return f"({to_tptp(lhs)} | {to_tptp(rhs)})"
+    if name == "Or":
+        return "(" + " | ".join(to_tptp(arg) for arg in expr.args) + ")"
     if name == "Not":
         return f"~{to_tptp(expr.args[0])}"
     # No branch for "Implies". :func:`~endoxa.solver.Implies` builds

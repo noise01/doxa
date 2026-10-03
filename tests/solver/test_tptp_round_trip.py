@@ -12,7 +12,7 @@ identical formulas are one object, so ``is`` compares meaning, not spelling.
 
 import pytest
 
-from endoxa.solver import INT_SORT, Bool, BoolVal, Function, Int, Not, Or, parse_fof, to_tptp
+from endoxa.solver import INT_SORT, And, Bool, BoolVal, Function, Int, Not, Or, parse_fof, to_tptp
 
 #: One per construction the writer handles. The surface forms differ from what
 #: comes back -- the writer parenthesises and spaces to its own taste -- which is
@@ -82,3 +82,38 @@ class TestWhatTheWriterDoesNotSpecialCase:
     def test_implies_itself_is_written_as_an_arrow(self):
         """Built through the API it is an ``Or`` over a ``Not``, and comes back as ``=>``."""
         assert to_tptp(Or(Not(Bool("p")), Bool("q"))) == "(p => q)"
+
+
+@pytest.mark.parametrize(
+    "formula",
+    [
+        "(p & q & r)",
+        "(p | q | r)",
+        "(~p | q | r)",
+        "((p & q) & (r & s))",
+        "((p | q) | (r | s))",
+        "![X] : (p(X) & q(X) & r(X))",
+        "((p & q & r) | (s & t & u))",
+    ],
+)
+def test_nary_formulas_keep_every_operand(formula):
+    expr = _parse(formula)
+    assert _parse(to_tptp(expr)) is expr
+
+
+@pytest.mark.parametrize(("constructor", "empty"), [(And, True), (Or, False)])
+@pytest.mark.parametrize("arity", [0, 1, 2, 3, 5])
+def test_normalized_connectives_round_trip(constructor, empty, arity):
+    args = [_parse(f"p{i}") for i in range(arity)]
+    expr = constructor(*args)
+    assert _parse(to_tptp(expr)) is expr
+    if not args:
+        assert expr is BoolVal(val=empty)
+    elif len(args) == 1:
+        assert expr is args[0]
+
+
+def test_binary_connective_spelling_stays_compatible():
+    assert to_tptp(_parse("p & q")) == "(p & q)"
+    assert to_tptp(_parse("p | q")) == "(p | q)"
+    assert to_tptp(_parse("p => q")) == "(p => q)"
