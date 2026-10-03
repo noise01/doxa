@@ -9,7 +9,7 @@ for an antecedent held true with its consequent held false.
 rule retracts. ``backward_implication_clauses`` (/) is the one
 derivation-side synthesizer: it walks the implication links backwards from a
 verification target so an acquired consequence is provable, not just detectable.
-The clause tests drive the real solver (``check_consistency`` / ``entails``) so a
+The clause tests drive the real solver (``check_consistency`` / ``check_atom_support``) so a
 synthesized clause's UNSAT is genuine, not asserted.
 """
 
@@ -18,8 +18,8 @@ from typing import Any
 from endoxa.governance.revision import (
     PredicateConstraints,
     backward_implication_clauses,
+    check_atom_support,
     check_consistency,
-    entails,
     functional_exclusion_clauses,
     functional_exclusion_partner,
     implication_clauses,
@@ -31,11 +31,11 @@ _FUNCTIONAL = ("lives_in", "works_at")
 
 
 def _true(node_id: str) -> tuple[str, dict[str, Any]]:
-    return node_id, {"belief_context": "user", "confidence": 1.0, "truth_value": True}
+    return node_id, {"atom": node_id, "stance": "asserted", "confidence": 1.0, "truth_value": True}
 
 
 def _false(node_id: str) -> tuple[str, dict[str, Any]]:
-    return node_id, {"belief_context": "user", "confidence": 1.0, "truth_value": False}
+    return node_id, {"atom": node_id, "stance": "asserted", "confidence": 1.0, "truth_value": False}
 
 
 class TestFunctionalExclusionClauses:
@@ -71,7 +71,12 @@ class TestFunctionalExclusionClauses:
     def test_false_atoms_do_not_participate(self) -> None:
         # Exclusion is stated over the atom *holding*; a retracted value is inert.
         beliefs = dict([_true("lives_in(alice, tokyo)")])
-        beliefs["lives_in(alice, osaka)"] = {"belief_context": "user", "confidence": 1.0, "truth_value": False}
+        beliefs["lives_in(alice, osaka)"] = {
+            "atom": "lives_in(alice, osaka)",
+            "stance": "asserted",
+            "confidence": 1.0,
+            "truth_value": False,
+        }
         assert functional_exclusion_clauses(beliefs, _FUNCTIONAL) == []
 
     def test_three_values_yield_pairwise_clauses(self) -> None:
@@ -139,7 +144,12 @@ class TestInterPredicateExclusionClauses:
     def test_false_atoms_do_not_participate(self) -> None:
         # Exclusion is stated over the atom *holding*; a retracted value is inert.
         beliefs = dict([_true("alive(socrates)")])
-        beliefs["dead(socrates)"] = {"belief_context": "user", "confidence": 1.0, "truth_value": False}
+        beliefs["dead(socrates)"] = {
+            "atom": "dead(socrates)",
+            "stance": "asserted",
+            "confidence": 1.0,
+            "truth_value": False,
+        }
         assert inter_predicate_exclusion_clauses(beliefs, {"dead": {"alive"}}) == []
 
     def test_exclusion_class_yields_pairwise_clauses(self) -> None:
@@ -264,7 +274,12 @@ class TestLinkClauses:
         assert len(predicate_clauses(beliefs, constraints)) == 3
 
         # Retracting one leaves a single clash between the remaining two.
-        beliefs["lives_in(alice, kyoto)"] = {"belief_context": "user", "confidence": 1.0, "truth_value": False}
+        beliefs["lives_in(alice, kyoto)"] = {
+            "atom": "lives_in(alice, kyoto)",
+            "stance": "asserted",
+            "confidence": 1.0,
+            "truth_value": False,
+        }
         assert len(predicate_clauses(beliefs, constraints)) == 1
 
     def test_empty_constraints_are_a_no_op(self) -> None:
@@ -292,7 +307,12 @@ class TestFunctionalExclusionPartner:
 
     def test_ignores_retracted_partner(self) -> None:
         beliefs = dict([_true("lives_in(alice, osaka)")])
-        beliefs["lives_in(alice, tokyo)"] = {"belief_context": "user", "confidence": 1.0, "truth_value": False}
+        beliefs["lives_in(alice, tokyo)"] = {
+            "atom": "lives_in(alice, tokyo)",
+            "stance": "asserted",
+            "confidence": 1.0,
+            "truth_value": False,
+        }
         assert functional_exclusion_partner("lives_in(alice, osaka)", beliefs, _FUNCTIONAL) is None
 
     def test_empty_config_yields_no_partner(self) -> None:
@@ -303,7 +323,7 @@ class TestFunctionalExclusionPartner:
 class TestBackwardImplicationClauses:
     """Derivation-side synthesis for the belief-verification query.
 
-    Every case runs the real ``entails`` so the verdict is the solver's, not the
+    Every case runs the real ``check_atom_support`` so the verdict is the solver's, not the
     clause list's shape. The baseline each one contrasts against is the verdict
     without the clauses -- the state before this increment.
     """
@@ -313,10 +333,10 @@ class TestBackwardImplicationClauses:
         # the target. Without the clauses the query cannot see the link at all.
         beliefs = dict([_true("cat(felix)")])
         targets = {"cat": {"animal"}}
-        assert entails(beliefs, [], "animal(felix)") == "NOT_ENTAILED"
+        assert check_atom_support(beliefs, [], "animal(felix)").verdict == "NOT_ENTAILED"
 
         clauses = backward_implication_clauses("animal(felix)", targets)
-        assert entails(beliefs, clauses, "animal(felix)") == "ENTAILED"
+        assert check_atom_support(beliefs, clauses, "animal(felix)").verdict == "ENTAILED"
 
     def test_no_links_is_a_no_op(self) -> None:
         assert backward_implication_clauses("animal(felix)", {}) == []
@@ -327,7 +347,7 @@ class TestBackwardImplicationClauses:
         beliefs = dict([_true("rose(r1)")])
         clauses = backward_implication_clauses("animal(r1)", {"rose": {"flower"}})
         assert clauses == []
-        assert entails(beliefs, clauses, "animal(r1)") == "NOT_ENTAILED"
+        assert check_atom_support(beliefs, clauses, "animal(r1)").verdict == "NOT_ENTAILED"
 
     def test_multi_hop_chain_is_entailed(self) -> None:
         # r => q => p: the closure must carry the target, or "can the system verify
@@ -335,7 +355,7 @@ class TestBackwardImplicationClauses:
         beliefs = dict([_true("sparrow(s1)")])
         targets = {"sparrow": {"bird"}, "bird": {"animal"}}
         clauses = backward_implication_clauses("animal(s1)", targets)
-        assert entails(beliefs, clauses, "animal(s1)") == "ENTAILED"
+        assert check_atom_support(beliefs, clauses, "animal(s1)").verdict == "ENTAILED"
 
     def test_cyclic_links_terminate(self) -> None:
         # p => q => p. Expanding each predicate once bounds the walk; the target
@@ -343,23 +363,23 @@ class TestBackwardImplicationClauses:
         beliefs = dict([_true("q(x1)")])
         targets = {"p": {"q"}, "q": {"p"}}
         clauses = backward_implication_clauses("p(x1)", targets)
-        assert entails(beliefs, clauses, "p(x1)") == "ENTAILED"
+        assert check_atom_support(beliefs, clauses, "p(x1)").verdict == "ENTAILED"
 
     def test_antecedent_held_false_does_not_entail(self) -> None:
         beliefs = dict([_false("cat(felix)")])
         clauses = backward_implication_clauses("animal(felix)", {"cat": {"animal"}})
-        assert entails(beliefs, clauses, "animal(felix)") == "NOT_ENTAILED"
+        assert check_atom_support(beliefs, clauses, "animal(felix)").verdict == "NOT_ENTAILED"
 
     def test_absent_antecedent_does_not_entail(self) -> None:
         # The link is present but nothing on the beliefs discharges it.
         clauses = backward_implication_clauses("animal(felix)", {"cat": {"animal"}})
-        assert entails({}, clauses, "animal(felix)") == "NOT_ENTAILED"
+        assert check_atom_support({}, clauses, "animal(felix)").verdict == "NOT_ENTAILED"
 
     def test_direction_is_not_symmetrized(self) -> None:
         # cat(x) -> animal(x) must not license animal(x) -> cat(x).
         beliefs = dict([_true("animal(felix)")])
         clauses = backward_implication_clauses("cat(felix)", {"cat": {"animal"}})
-        assert entails(beliefs, clauses, "cat(felix)") == "NOT_ENTAILED"
+        assert check_atom_support(beliefs, clauses, "cat(felix)").verdict == "NOT_ENTAILED"
 
     def test_target_does_not_prove_itself(self) -> None:
         # The target sits in the belief set at face value, which is exactly the
@@ -367,18 +387,18 @@ class TestBackwardImplicationClauses:
         # antecedent is missing, so the answer must stay NOT_ENTAILED.
         beliefs = dict([_true("animal(felix)")])
         clauses = backward_implication_clauses("animal(felix)", {"cat": {"animal"}})
-        assert entails(beliefs, clauses, "animal(felix)") == "NOT_ENTAILED"
+        assert check_atom_support(beliefs, clauses, "animal(felix)").verdict == "NOT_ENTAILED"
 
     def test_other_arguments_are_untouched(self) -> None:
         # Implication is stated over the identical argument tuple.
         beliefs = dict([_true("cat(felix)")])
         clauses = backward_implication_clauses("animal(rex)", {"cat": {"animal"}})
-        assert entails(beliefs, clauses, "animal(rex)") == "NOT_ENTAILED"
+        assert check_atom_support(beliefs, clauses, "animal(rex)").verdict == "NOT_ENTAILED"
 
     def test_multi_argument_target(self) -> None:
         beliefs = dict([_true("parent_of(alice, bob)")])
         clauses = backward_implication_clauses("ancestor_of(alice, bob)", {"parent_of": {"ancestor_of"}})
-        assert entails(beliefs, clauses, "ancestor_of(alice, bob)") == "ENTAILED"
+        assert check_atom_support(beliefs, clauses, "ancestor_of(alice, bob)").verdict == "ENTAILED"
 
     def test_malformed_target_yields_no_clauses(self) -> None:
         assert backward_implication_clauses("not an atom", {"cat": {"animal"}}) == []

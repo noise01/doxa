@@ -1,39 +1,19 @@
-"""Recovering the ledger from what the host already records.
+"""An optional read-only adapter for a legacy audit-row dialect.
 
-The separation this rests on is between *the source of truth on the API* and
-*the source of truth in the implementation*: the ledger is the former, a host's
-own stores stay the latter. This module is what makes that separation cost
-nothing at the write side -- it is a **read-only derivation** of the operation
-series from a host's persisted audit log. No write path changes; the ledger is a
-way of reading what already happened.
+This is not a general event bus or a requirement for ledger use. New callers can
+construct :class:`~endoxa.governance.ledger.LedgerOp` directly and fold their own
+ordered operation sequence with :func:`~endoxa.governance.view.reconstruct_view`.
 
-**Why the event log and not the current state.** The current state alone cannot
-yield the series: a retraction is a flip that leaves no trace of the flip, and
-checking a reconstruction needs a series to reconstruct *from*. An audit log is
-the only place a host keeps the order of what it did, so it is the primary
-input; the host's own state is what the derived view is then checked against
-(:func:`~endoxa.governance.view.compare_to_state`).
+``derive_ledger`` accepts mappings with ``id``, ``timestamp``, ``event_type`` and
+``payload`` (a mapping or JSON text). The constants below identify the supported
+event names; handlers define their payload shapes. Other event types are ignored.
+Rows are ordered by timestamp and event ID, preserving the adapter's existing
+conversion behavior. No event classes or storage dependencies are imported.
 
-**The horizon.** A host that prunes its audit log by event type can have had
-governance operations swept out from under it, and a derivation that stayed
-silent about that would be claiming a completeness it does not have.
-:class:`DerivedLedger` therefore reports the horizon -- the earliest row it saw
--- rather than pretending the series starts at the beginning of time.
-
-**Keeping the ledger-bearing types does not retire the horizon.** A retention
-policy acts *forward*: what was already swept cannot be un-swept, and a host
-remains free to configure one that keeps less. So the horizon keeps meaning
-exactly what it always meant -- the earliest row this derivation could read,
-which is not a claim of completeness.
-
-**Reading the host's event names.** This package may not import a host's own
-event definitions -- it has to work against a host it was never built for -- so
-the event type names live here as string constants. The host owes the other half
-of that bargain: a test on its side pinning these strings against whatever it
-actually emits, because a rename it never notices silently empties the ledger.
-
-Pure and dependency-free: the input is the raw row shape a host's event store
-returns.
+:class:`DerivedLedger` reports rows read, unreadable rows and a horizon: the
+earliest row seen, not a guarantee that a retained log contains the entire
+history. Callers remain responsible for retention and for validating their row
+dialect against this adapter before relying on its output.
 """
 
 import json
@@ -44,8 +24,7 @@ from typing import Any, cast
 
 from endoxa.governance.ledger import EVIDENCE_REASONS, EvidenceReason, LedgerOp, OpKind, SupportRef
 
-#: Host event class names the derivation reads. Pinned against the real classes
-#: by a host-side test (see the module docstring).
+#: Supported event names in the legacy audit-row dialect.
 ATOM_ADDED = "AtomAddedEvent"
 BELIEF_EVIDENCE_BOOKED = "BeliefEvidenceBookedEvent"
 BELIEF_EVIDENCE_RECORDED = "BeliefEvidenceRecordedEvent"

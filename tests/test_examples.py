@@ -6,7 +6,7 @@ until someone tried to install the package. So these are executed here as a
 reader would execute them -- as scripts, from the repository root -- and the
 numbers their prose points at are asserted, not just their exit codes.
 
-The enumeration checks itself. A fourth example added without a row below would
+The enumeration checks itself. An example added without a row below would
 otherwise be the one nobody runs.
 """
 
@@ -21,6 +21,13 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 #: Each example, with the lines its own prose commits it to. Substrings rather
 #: than whole output: what is pinned is the claim, not the layout.
 CLAIMS: dict[str, tuple[str, ...]] = {
+    "04_direct_ledger.py": ("operations: 2", "atom: door_closed(room)", "source: tool"),
+    "05_public_solver_interfaces.py": (
+        "expression body: label(X)",
+        "revision candidates: 1",
+        "bound-variable type: True",
+        "pattern type: True",
+    ),
     "01_a_contradiction_is_caught.py": (
         "consistent: False",
         # The weaker claim gives way, and the rule and the user's assertion do not.

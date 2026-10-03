@@ -5,9 +5,9 @@ picks one is not deciding, it is guessing and then reporting the guess as a
 belief. Here the inability is a state with a name: both sides stay, both are
 marked `UNRESOLVED`, and the pair is on the record as a pair.
 
-That is also what makes the state actionable. A held tie is the one situation
-where asking is provably worth more than thinking harder, and the hold names
-exactly which question to ask.
+An external answer can resolve the recorded tie. The library identifies the
+conflicting claims; it does not choose a question or decide whether asking is
+worth its cost.
 
 Run: python examples/02_a_tie_is_not_a_coin_flip.py
 """
@@ -19,8 +19,8 @@ from endoxa.governance import Belief, Constraints, LedgerOp, govern, reconstruct
 EXCLUSIVE = "fof(x, axiom, ~(indoors(cat) & outdoors(cat)))."
 
 pair = [
-    Belief(target="indoors(cat)", truth_value=True, confidence=0.6, context="agent"),
-    Belief(target="outdoors(cat)", truth_value=True, confidence=0.6, context="agent"),
+    Belief(truth_value=True, confidence=0.6, id="indoors(cat)", atom="indoors(cat)", stance="asserted"),
+    Belief(truth_value=True, confidence=0.6, id="outdoors(cat)", atom="outdoors(cat)", stance="asserted"),
 ]
 
 outcome = govern(pair, Constraints(hard_axioms=(EXCLUSIVE,)))
@@ -35,7 +35,16 @@ print(f"  answering no  to the first would affirm: {outcome.hold.affirm_false}")
 print()
 
 ledger = [
-    LedgerOp(op="assert", target=b.target, actor=b.context, truth_value=b.truth_value, confidence=b.confidence)
+    LedgerOp(
+        op="assert",
+        target=b.id,
+        actor="example",
+        atom=b.atom,
+        stance=b.stance,
+        source=b.source,
+        truth_value=b.truth_value,
+        confidence=b.confidence,
+    )
     for b in pair
 ]
 ledger += list(outcome.ops)

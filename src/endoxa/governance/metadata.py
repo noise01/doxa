@@ -3,6 +3,7 @@
 import math
 import re
 from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
 from endoxa.errors import InvalidArgumentError, RuleSyntaxError
@@ -51,15 +52,15 @@ def validate_confidence(value: float) -> None:
 
 
 def atom_text(node_id: str, data: Mapping[str, Any]) -> str:
-    """Explicit atom when recorded; otherwise the legacy identity-as-expression."""
-    atom = data.get("atom")
-    return node_id if atom is None else canonical_atom(atom)
+    """Read a required explicit atom; an ID is never a formula fallback."""
+    if "atom" not in data:
+        msg = f"Belief {node_id!r} requires an explicit atom"
+        raise InvalidArgumentError(msg)
+    return canonical_atom(data["atom"])
 
 
 def validate_atom_ids(beliefs: Mapping[str, Mapping[str, Any]]) -> None:
-    """Refuse ambiguous explicit-atom maps; leave legacy low-level queries alone."""
-    if not any(data.get("atom") is not None for data in beliefs.values()):
-        return
+    """Refuse missing atoms and ambiguous atom ownership in revision maps."""
     owners: dict[str, str] = {}
     for node_id, data in beliefs.items():
         validate_id(node_id)
@@ -68,3 +69,45 @@ def validate_atom_ids(beliefs: Mapping[str, Mapping[str, Any]]) -> None:
             msg = f"Atom {atom!r} has multiple belief IDs: {owners[atom]!r}, {node_id!r}"
             raise InvalidArgumentError(msg)
         owners[atom] = node_id
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Belief:
+    """An explicitly identified flat ground belief supplied to governance.
+
+    The caller supplies stance independently of source and confidence. IDs are
+    opaque; atom whitespace is normalized without changing identity.
+    """
+
+    id: str
+    atom: str
+    truth_value: bool
+    confidence: float
+    stance: Stance
+    source: str | None = None
+
+    def __post_init__(self) -> None:
+        validate_id(self.id)
+        validate_confidence(self.confidence)
+        validate_stance(self.stance)
+        if self.stance is None:
+            msg = "Belief requires an explicit stance"
+            raise InvalidArgumentError(msg)
+        validate_source(self.source)
+        if not isinstance(self.truth_value, bool):
+            msg = "Belief truth_value must be a bool"
+            raise InvalidArgumentError(msg)
+        object.__setattr__(self, "atom", canonical_atom(self.atom))
+
+    def to_record(self) -> dict[str, Any]:
+        """Encode the explicit fields as a plain record, including missing source."""
+        return asdict(self)
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> Belief:
+        """Restore an explicit field record without guessing absent metadata."""
+        try:
+            return cls(**dict(record))
+        except TypeError as error:
+            msg = "Invalid belief field record"
+            raise InvalidArgumentError(msg) from error

@@ -60,7 +60,7 @@ def test_propositional_check_ignores_budget() -> None:
 
 def test_check_consistency_cuts_matching_loop() -> None:
     """The tms.check_consistency wrapper reports UNKNOWN when the budget is spent."""
-    beliefs = {"p(a)": {"truth_value": True, "confidence": 1.0, "belief_context": "user"}}
+    beliefs = {"p(a)": {"atom": "p(a)", "truth_value": True, "confidence": 1.0, "stance": "asserted"}}
     result, unsat_core, _map = check_consistency(beliefs, [_LOOP_RULE], max_rounds=3)
     assert result == "UNKNOWN"
     assert unsat_core == []
@@ -69,8 +69,8 @@ def test_check_consistency_cuts_matching_loop() -> None:
 def test_check_consistency_unbounded_by_default() -> None:
     """Without a budget, a well-behaved check keeps its original SAT/UNSAT result."""
     beliefs = {
-        "animal(kitty)": {"truth_value": False, "confidence": 1.0, "belief_context": "user"},
-        "cat(kitty)": {"truth_value": True, "confidence": 0.8, "belief_context": "user"},
+        "animal(kitty)": {"atom": "animal(kitty)", "truth_value": False, "confidence": 1.0, "stance": "asserted"},
+        "cat(kitty)": {"atom": "cat(kitty)", "truth_value": True, "confidence": 0.8, "stance": "asserted"},
     }
     rule = parse_fof("fof(rule_animal, axiom, ![X] : (cat(X) => animal(X))).")[2]
     result, _core, _map = check_consistency(beliefs, [rule])

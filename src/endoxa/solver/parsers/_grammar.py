@@ -55,7 +55,7 @@ class FofTransformer(Transformer[Token, tuple[str, str, Expr]]):
         decl = FuncDecl(functor, tuple(arg.sort for arg in args), BOOL_SORT)
         return global_ctx.mk_app(decl, *args)
 
-    # The two Boolean constants. ``to_tptp`` has always written them; until the
+    # The two Boolean constants. ``to_tptp_expr`` has always written them; until the
     # grammar knew them, its output for a formula containing one was text this
     # package's own parser refused.
     def true_expr(self, _token: Token) -> Expr:

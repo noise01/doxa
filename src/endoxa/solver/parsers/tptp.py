@@ -33,7 +33,11 @@ def parse_fof(input_str: str) -> tuple[str, str, Expr]:
     return _parse(input_str)
 
 
-def to_tptp(expr: Expr) -> str:
+def to_tptp_expr(expr: Expr) -> str:
+    """Serialize an expression body, without a named FOF statement wrapper.
+
+    Accepts terms as well as Boolean formulas; no FOF role is selected.
+    """
     if isinstance(expr, Const):
         if isinstance(expr.value, bool):
             return "$true" if expr.value else "$false"
@@ -48,7 +52,7 @@ def to_tptp(expr: Expr) -> str:
     if isinstance(expr, Quantifier):
         quant = "!" if expr.is_forall else "?"
         vars_str = ", ".join(v.name for v in expr.bound_vars)
-        return f"({quant} [{vars_str}] : {to_tptp(expr.body)})"
+        return f"({quant} [{vars_str}] : {to_tptp_expr(expr.body)})"
 
     return str(expr)
 
@@ -56,25 +60,25 @@ def to_tptp(expr: Expr) -> str:
 def _app_to_tptp(expr: App) -> str:
     name = expr.decl.name
     if name == "And":
-        return "(" + " & ".join(to_tptp(arg) for arg in expr.args) + ")"
+        return "(" + " & ".join(to_tptp_expr(arg) for arg in expr.args) + ")"
     if name == "Or" and len(expr.args) == _BINARY_ARITY:
         lhs = expr.args[0]
         rhs = expr.args[1]
         if isinstance(lhs, App) and lhs.decl.name == "Not":
-            return f"({to_tptp(lhs.args[0])} => {to_tptp(rhs)})"
-        return f"({to_tptp(lhs)} | {to_tptp(rhs)})"
+            return f"({to_tptp_expr(lhs.args[0])} => {to_tptp_expr(rhs)})"
+        return f"({to_tptp_expr(lhs)} | {to_tptp_expr(rhs)})"
     if name == "Or":
-        return "(" + " | ".join(to_tptp(arg) for arg in expr.args) + ")"
+        return "(" + " | ".join(to_tptp_expr(arg) for arg in expr.args) + ")"
     if name == "Not":
-        return f"~{to_tptp(expr.args[0])}"
+        return f"~{to_tptp_expr(expr.args[0])}"
     # No branch for "Implies". :func:`~endoxa.solver.Implies` builds
     # ``Or(Not(p), q)`` and no declaration of that name is ever created, so such a
     # branch could only fire on a caller's own predicate called ``Implies`` --
     # where writing it out as an arrow would be wrong.
     if name == "Eq":
-        return f"({to_tptp(expr.args[0])} = {to_tptp(expr.args[1])})"
+        return f"({to_tptp_expr(expr.args[0])} = {to_tptp_expr(expr.args[1])})"
 
     if not expr.args:
         return name
-    args_str = ", ".join(to_tptp(arg) for arg in expr.args)
+    args_str = ", ".join(to_tptp_expr(arg) for arg in expr.args)
     return f"{name}({args_str})"

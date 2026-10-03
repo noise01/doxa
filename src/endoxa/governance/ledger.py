@@ -1,46 +1,28 @@
 """The governance ledger's operation schema.
 
-A boundary that does not exist as a structure cannot be exported, so this module
-declares the governance layer as an **append-only ledger of operations**. It is a
-naming exercise rather than a new design: every operation below already happens
-in any system that revises beliefs, and :mod:`~endoxa.governance.derive` recovers
-the series from what a host already records.
+Construct :class:`LedgerOp` directly and append operations to a sequence you own.
+:func:`~endoxa.governance.view.reconstruct_view` folds that sequence in input
+order. No event schema, storage backend or dispatcher is required. The optional
+:mod:`~endoxa.governance.derive` adapter converts one existing audit-row dialect
+into the same operations; it is not a prerequisite for using the ledger.
 
-The seven operations. ``confirm`` and ``refute`` are deliberately *not* folded
-into a single "record evidence" operation with a polarity argument, so that a
-reader never has to recover the polarity from an argument:
+The seven operations:
 
 ``assert``
-    A belief is claimed. Birth confidence is decided by the source.
+    Claim a belief with its initial confidence.
 ``retract``
-    Revision withdrew it (it was chosen as the culprit). It leaves the current
-    view but **not the ledger**; counter-evidence is booked against it.
+    Withdraw a claim through revision; keep its history and book counter-evidence.
 ``supersede``
-    The world moved on (recency supersession). The old value was true
-    when written -- this is a state change, not a miscalibration.
+    Retire an old value after a state change, without treating it as an error.
 ``confirm`` / ``refute``
-    Evidence for / against is booked. Confidence moves; nothing is
-    withdrawn.
+    Book evidence for / against a belief and update its confidence.
 ``hold``
-    The tie no revision preference can separate. **Both sides stay in
-    the view**; this is the first-class form of ``UNRESOLVED``.
+    Record a tie revision preferences cannot separate, retaining both sides.
 ``ground``
-    An answer from outside landed. The only operation that confers confidence
-    1.0, and therefore the only one that directly releases a ``hold``.
+    Record an external answer at confidence 1.0 and release a hold.
 
-**Append-only applies to the schema itself.** A later increment must be able to
-fill in what it needs by *adding* operations and columns, never by changing the
-meaning of an existing one. The reserved columns below are that promise made
-concrete: named now, left empty on purpose.
-
-Two things have since tested the promise, and they came out differently. A
-reserved column was filled -- and the seat had been declared ``tuple[str, ...]``
-when what belonged in it was a set of *typed* endpoints, so reserving a seat and
-reserving its dimensions turn out to be different acts. Separately, a column was
-added that nobody had reserved at all, and it cost nothing, which is the point:
-the promise is about adding rather than about a fixed list of seats.
-
-Pure: its own field schemas and metadata, with no storage or I/O.
+The schema is append-only: preserve existing operation meanings when adding
+fields or operations. This module provides data only, with no storage or I/O.
 """
 
 from dataclasses import dataclass, field
@@ -74,12 +56,7 @@ TargetKind = Literal["atom", "rule", "link"]
 #: fixes a stable reading order for reports, as ``LEDGER_OPS`` does; membership
 #: tests should use it rather than re-listing the names.
 #:
-#: **These names live here rather than with whoever writes them.** The event names
-#: in :mod:`~endoxa.governance.derive` are duplicated and pinned by a host-side test,
-#: because this package may not import a host's event definitions -- that
-#: duplication is forced. A reason runs the other way: the ledger is what the word
-#: is for, and a host may import this package freely. So extend the set at its
-#: source rather than copying the strings into the writers.
+#: Import these constants when recording evidence reasons.
 
 #: A belief's footing went away and the loss was booked against it.
 REASON_SUPPORT_LOST = "support_lost"
@@ -100,10 +77,8 @@ EVIDENCE_REASONS: tuple[str, ...] = (
 
 EvidenceReason = Literal["support_lost", "reassertion", "revision_survived", "rule_retracted"]
 
-#: What the far end of a support is: ``derivation`` names an atom's node id,
-#: ``rule`` a learned axiom's memory id. Held as a string rather than imported
-#: from the host, and pinned against the host's own constants by the same
-#: host-side test that pins the event names.
+#: Support endpoint kind: ``derivation`` names a derived atom's ID and
+#: ``rule`` names an axiom's ID. The caller owns those identifiers.
 SupportKind = Literal["derivation", "rule"]
 
 
@@ -141,11 +116,9 @@ class LedgerOp:
         target: What it is about -- a belief ID for atom, a rule ID for rule.
             Legacy atom IDs are expression strings; explicit IDs stay opaque.
         target_kind: Which kind of thing ``target`` names.
-        actor: The role that performed the write, verbatim from the host
-            (``user``/``agent``/``observation``/``hypothesis``/``axiom`` ...).
-            Carried rather than interpreted: whether a retraction came from the
-            TMS or from a user's own correction is a distinction the ledger
-            should let a reader draw, not one it should erase.
+        actor: Caller-supplied attribution for the writer. It is separate from
+            explicit stance and source metadata. Legacy replay also uses it to
+            populate context when explicit metadata is absent.
         truth_value: The claim's truth value after the operation, when the
             operation states one. ``None`` means "this operation does not move
             it" (evidence bookings and holds).
@@ -155,7 +128,7 @@ class LedgerOp:
             the Laplace fold the view replays.
         partner: The other side of a ``hold``. A tie is a *pair*, so a hold names
             both members; ``None`` for every other operation.
-        origin_event_id: The host event this operation was derived from, or
+        origin_event_id: The audit event this operation was derived from, or
             ``None`` when the operation could not be attributed to one (see
             :mod:`~endoxa.governance.derive`).
         at: Wall-clock time of the originating event (epoch seconds), or

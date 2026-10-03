@@ -17,7 +17,13 @@ _IMPLICATION = "fof(impl, axiom, ![X] : (cat(X) => animal(X)))."
 
 
 def _belief(target: str, *, truth: bool = True, confidence: float = 0.9, context: str = "user") -> Belief:
-    return Belief(target=target, truth_value=truth, confidence=confidence, context=context)
+    return Belief(
+        truth_value=truth,
+        confidence=confidence,
+        id=target,
+        atom=target,
+        stance=("hypothesis" if context == "hypothesis" else "asserted"),
+    )
 
 
 class TestConsistentBoards:

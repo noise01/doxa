@@ -125,7 +125,7 @@ class BeliefState:
         if self.target_kind != "atom" or self.atom is None or self.stance is None or self.confidence is None:
             msg = "A recorded atom, stance and confidence are required to restore a belief"
             raise InvalidArgumentError(msg)
-        return Belief.from_atom(
+        return Belief(
             id=self.target,
             atom=self.atom,
             truth_value=self.truth_value,

@@ -84,28 +84,52 @@ class TestSelectRevisionTarget:
 
     def test_user_testimony_below_one_is_revisable(self) -> None:
         core, mapping = _core("mortal(socrates)")
-        beliefs = {"mortal(socrates)": {"belief_context": "user", "confidence": 0.95, "truth_value": False}}
+        beliefs = {
+            "mortal(socrates)": {
+                "atom": "mortal(socrates)",
+                "stance": "asserted",
+                "confidence": 0.95,
+                "truth_value": False,
+            }
+        }
         target = select_revision_target(core, beliefs, mapping)
         assert target is not None
         assert target[0] == "mortal(socrates)"
 
     def test_inviolable_user_belief_is_not_revisable(self) -> None:
         core, mapping = _core("mortal(socrates)")
-        beliefs = {"mortal(socrates)": {"belief_context": "user", "confidence": 1.0, "truth_value": False}}
+        beliefs = {
+            "mortal(socrates)": {
+                "atom": "mortal(socrates)",
+                "stance": "asserted",
+                "confidence": 1.0,
+                "truth_value": False,
+            }
+        }
         assert select_revision_target(core, beliefs, mapping) is None
 
     def test_unmarked_belief_defaults_to_inviolable(self) -> None:
         # No confidence key: fails safe toward 1.0, so nothing is revised.
         core, mapping = _core("mortal(socrates)")
-        beliefs = {"mortal(socrates)": {"belief_context": "user", "truth_value": False}}
+        beliefs = {"mortal(socrates)": {"atom": "mortal(socrates)", "stance": "asserted", "truth_value": False}}
         assert select_revision_target(core, beliefs, mapping) is None
 
     def test_lowest_confidence_fallible_belief_wins(self) -> None:
         # A grounded observation (0.9) is peeled before user testimony (0.95).
         core, mapping = _core("human(socrates)", "mortal(socrates)")
         beliefs = {
-            "human(socrates)": {"belief_context": "user", "confidence": 0.95, "truth_value": True},
-            "mortal(socrates)": {"belief_context": "observation", "confidence": 0.9, "truth_value": False},
+            "human(socrates)": {
+                "atom": "human(socrates)",
+                "stance": "asserted",
+                "confidence": 0.95,
+                "truth_value": True,
+            },
+            "mortal(socrates)": {
+                "atom": "mortal(socrates)",
+                "stance": "asserted",
+                "confidence": 0.9,
+                "truth_value": False,
+            },
         }
         target = select_revision_target(core, beliefs, mapping)
         assert target is not None
@@ -115,8 +139,18 @@ class TestSelectRevisionTarget:
         # The hypothesis branch fires first even against a lower-confidence belief.
         core, mapping = _core("human(socrates)", "mortal(socrates)")
         beliefs = {
-            "human(socrates)": {"belief_context": "hypothesis", "confidence": 0.5, "truth_value": True},
-            "mortal(socrates)": {"belief_context": "user", "confidence": 0.95, "truth_value": False},
+            "human(socrates)": {
+                "atom": "human(socrates)",
+                "stance": "hypothesis",
+                "confidence": 0.5,
+                "truth_value": True,
+            },
+            "mortal(socrates)": {
+                "atom": "mortal(socrates)",
+                "stance": "asserted",
+                "confidence": 0.95,
+                "truth_value": False,
+            },
         }
         target = select_revision_target(core, beliefs, mapping)
         assert target is not None

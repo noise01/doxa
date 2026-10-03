@@ -5,46 +5,21 @@ import subprocess
 import sys
 from pathlib import Path
 
-from endoxa.governance import Belief, LedgerOp, Rule
-from endoxa.governance.revision import entails
+from endoxa.governance import Belief
+from endoxa.governance.revision import check_atom_support
+from endoxa.solver import parse_fof
 
 
-def test_existing_constructor_positions_and_new_keyword_only_fields():
-    expected = {
-        Belief: ["target", "truth_value", "confidence", "context"],
-        Rule: ["name", "axiom", "confidence", "defeasible"],
-        LedgerOp: [
-            "op",
-            "target",
-            "target_kind",
-            "actor",
-            "truth_value",
-            "confidence",
-            "partner",
-            "origin_event_id",
-            "at",
-            "reason",
-            "session_id",
-            "supported_by",
-            "valid_at",
-        ],
-    }
-    for cls, positional in expected.items():
-        parameters = inspect.signature(cls).parameters
-        assert [name for name, item in parameters.items() if item.kind == item.POSITIONAL_OR_KEYWORD] == positional
-        if cls is not Rule:
-            for name in ("atom", "stance", "source"):
-                assert parameters[name].kind == inspect.Parameter.KEYWORD_ONLY
-                assert parameters[name].default is None
+def test_belief_signature_has_no_inferred_identity_or_context():
+    parameters = inspect.signature(Belief).parameters
+    assert set(parameters) == {"id", "atom", "truth_value", "confidence", "stance", "source"}
+    assert all(item.kind == item.KEYWORD_ONLY for item in parameters.values())
 
 
-def test_legacy_entails_retains_unguarded_inconsistent_premises():
-    # Old consumers receive the old refutation answer until they explicitly
-    # adopt the consistency-guarded support query. No silent semantic switch.
-    beliefs = {"p": {"truth_value": True}, " p ": {"truth_value": False}}
-    assert entails(beliefs, [], "q") == "ENTAILED"
-    # The legacy fact parser also accepts arbitrary propositional names.
-    assert entails({"p(a)": {}}, [], "bad atom") == "NOT_ENTAILED"
+def test_atom_support_refuses_inconsistent_premises():
+
+    contradiction = parse_fof("fof(c, axiom, (p & ~p)).")[2]
+    assert check_atom_support({}, [contradiction], "q").verdict == "INCONSISTENT_PREMISES"
 
 
 def test_minimal_consumer_uses_only_public_interfaces_in_a_fresh_process():
@@ -78,9 +53,9 @@ from endoxa.governance import (
 
 # The consumer owns its in-memory records and applies returned ID operations.
 beliefs = [
-    Belief.from_atom(id="claim:1", atom="human(a)", truth_value=True,
+    Belief(id="claim:1", atom="human(a)", truth_value=True,
                      confidence=1.0, stance="asserted", source="user"),
-    Belief.from_atom(id="claim:2", atom="mortal(a)", truth_value=False,
+    Belief(id="claim:2", atom="mortal(a)", truth_value=False,
                      confidence=0.6, stance="hypothesis"),
 ]
 rule = Rule.from_fof("fof(r, axiom, ![X]: (human(X) => mortal(X))).",
@@ -107,6 +82,13 @@ assert check_belief_support(restored, [parse_query_fof(
 legacy = reconstruct_view([LedgerOp("assert", "p(a)", actor="hypothesis", confidence=0.7)])
 assert legacy["p(a)"].context == "hypothesis"
 assert legacy["p(a)"].stance is None
+from endoxa.governance.revision import PredicateConstraints
+from endoxa.solver import BoundVar, BoundVarExpr, MultiPattern, Pattern, USort, to_tptp_expr
+x = BoundVar("X", USort("item"))
+assert isinstance(x, BoundVarExpr)
+assert isinstance(MultiPattern(x), Pattern)
+assert to_tptp_expr(x) == "X"
+assert PredicateConstraints().revision_candidates() == []
 print("public consumer contract passed")
 """.replace("SOURCE", repr(str(source)))
     result = subprocess.run(  # noqa: S603 - our interpreter and fixed fixture

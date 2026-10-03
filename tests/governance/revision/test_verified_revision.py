@@ -51,9 +51,9 @@ class TestWhiffAvoidance:
             _rule("fof(excl, axiom, ![X] : ~(p(X) & q(X)))."),
         ]
         beliefs = {
-            "a(c)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-            "p(c)": {"belief_context": "hypothesis", "confidence": 0.5, "truth_value": True},
-            "q(c)": {"belief_context": "observation", "confidence": 0.9, "truth_value": True},
+            "a(c)": {"atom": "a(c)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
+            "p(c)": {"atom": "p(c)", "stance": "hypothesis", "confidence": 0.5, "truth_value": True},
+            "q(c)": {"atom": "q(c)", "stance": "asserted", "confidence": 0.9, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         target = select_verified_revision_target(core, beliefs, mapping, rules)
@@ -65,8 +65,8 @@ class TestWhiffAvoidance:
         # the asserted ~b(c) (as b(c) with truth_value False) is the real fix.
         rules = [_rule("fof(r, axiom, ![X] : (a(X) => b(X))).")]
         beliefs = {
-            "a(c)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-            "b(c)": {"belief_context": "observation", "confidence": 0.9, "truth_value": False},
+            "a(c)": {"atom": "a(c)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
+            "b(c)": {"atom": "b(c)", "stance": "asserted", "confidence": 0.9, "truth_value": False},
         }
         core, mapping = _core_for(beliefs, rules)
         target = select_verified_revision_target(core, beliefs, mapping, rules)
@@ -85,10 +85,10 @@ class TestIndependentContradictions:
         # need not restore *global* SAT (d's clash remains for a later beat).
         rules = [_rule("fof(excl, axiom, ![X] : ~(p(X) & q(X))).")]
         beliefs = {
-            "p(c)": {"belief_context": "observation", "confidence": 0.9, "truth_value": True},
-            "q(c)": {"belief_context": "hypothesis", "confidence": 0.4, "truth_value": True},
-            "p(d)": {"belief_context": "observation", "confidence": 0.9, "truth_value": True},
-            "q(d)": {"belief_context": "hypothesis", "confidence": 0.4, "truth_value": True},
+            "p(c)": {"atom": "p(c)", "stance": "asserted", "confidence": 0.9, "truth_value": True},
+            "q(c)": {"atom": "q(c)", "stance": "hypothesis", "confidence": 0.4, "truth_value": True},
+            "p(d)": {"atom": "p(d)", "stance": "asserted", "confidence": 0.9, "truth_value": True},
+            "q(d)": {"atom": "q(d)", "stance": "hypothesis", "confidence": 0.4, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         target = select_verified_revision_target(core, beliefs, mapping, rules)
@@ -109,8 +109,8 @@ class TestBackwardCompatibility:
     def test_lowest_confidence_fallible_wins_direct_clash(self) -> None:
         rules = [_rule("fof(excl, axiom, ![X] : ~(human(X) & robot(X))).")]
         beliefs = {
-            "human(x)": {"belief_context": "user", "confidence": 0.95, "truth_value": True},
-            "robot(x)": {"belief_context": "observation", "confidence": 0.9, "truth_value": True},
+            "human(x)": {"atom": "human(x)", "stance": "asserted", "confidence": 0.95, "truth_value": True},
+            "robot(x)": {"atom": "robot(x)", "stance": "asserted", "confidence": 0.9, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         target = select_verified_revision_target(core, beliefs, mapping, rules)
@@ -122,8 +122,8 @@ class TestBackwardCompatibility:
         # its confidence is higher than the observation's.
         rules = [_rule("fof(excl, axiom, ![X] : ~(p(X) & q(X))).")]
         beliefs = {
-            "p(x)": {"belief_context": "hypothesis", "confidence": 0.6, "truth_value": True},
-            "q(x)": {"belief_context": "observation", "confidence": 0.5, "truth_value": True},
+            "p(x)": {"atom": "p(x)", "stance": "hypothesis", "confidence": 0.6, "truth_value": True},
+            "q(x)": {"atom": "q(x)", "stance": "asserted", "confidence": 0.5, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         target = select_verified_revision_target(core, beliefs, mapping, rules)
@@ -143,8 +143,8 @@ class TestEqualConfidenceTie:
     def test_two_settling_candidates_at_the_same_confidence_yield_no_target(self) -> None:
         rules = [_rule("fof(excl, axiom, ![X] : ~(alive(X) & dead(X))).")]
         beliefs = {
-            "alive(felix)": {"belief_context": "user", "confidence": 0.95, "truth_value": True},
-            "dead(felix)": {"belief_context": "user", "confidence": 0.95, "truth_value": True},
+            "alive(felix)": {"atom": "alive(felix)", "stance": "asserted", "confidence": 0.95, "truth_value": True},
+            "dead(felix)": {"atom": "dead(felix)", "stance": "asserted", "confidence": 0.95, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         assert select_verified_revision_target(core, beliefs, mapping, rules) is None
@@ -161,9 +161,9 @@ class TestEqualConfidenceTie:
             _rule("fof(derive, axiom, ![X] : (a(X) => q(X)))."),
         ]
         beliefs = {
-            "a(c)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-            "p(c)": {"belief_context": "user", "confidence": 0.5, "truth_value": True},
-            "q(c)": {"belief_context": "user", "confidence": 0.5, "truth_value": True},
+            "a(c)": {"atom": "a(c)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
+            "p(c)": {"atom": "p(c)", "stance": "asserted", "confidence": 0.5, "truth_value": True},
+            "q(c)": {"atom": "q(c)", "stance": "asserted", "confidence": 0.5, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         target = select_verified_revision_target(core, beliefs, mapping, rules)
@@ -181,9 +181,9 @@ class TestEqualConfidenceTie:
             _rule("fof(e, axiom, ![X] : ~(p(X) & q(X)))."),
         ]
         beliefs = {
-            "a(c)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-            "p(c)": {"belief_context": "user", "confidence": 0.4, "truth_value": True},
-            "q(c)": {"belief_context": "user", "confidence": 0.9, "truth_value": True},
+            "a(c)": {"atom": "a(c)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
+            "p(c)": {"atom": "p(c)", "stance": "asserted", "confidence": 0.4, "truth_value": True},
+            "q(c)": {"atom": "q(c)", "stance": "asserted", "confidence": 0.9, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         target = select_verified_revision_target(core, beliefs, mapping, rules)
@@ -194,8 +194,8 @@ class TestEqualConfidenceTie:
         """Equal confidence is not equal standing: being a guess is itself a reason to go first."""
         rules = [_rule("fof(excl, axiom, ![X] : ~(p(X) & q(X))).")]
         beliefs = {
-            "p(x)": {"belief_context": "hypothesis", "confidence": 0.5, "truth_value": True},
-            "q(x)": {"belief_context": "user", "confidence": 0.5, "truth_value": True},
+            "p(x)": {"atom": "p(x)", "stance": "hypothesis", "confidence": 0.5, "truth_value": True},
+            "q(x)": {"atom": "q(x)", "stance": "asserted", "confidence": 0.5, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         target = select_verified_revision_target(core, beliefs, mapping, rules)
@@ -206,8 +206,8 @@ class TestEqualConfidenceTie:
         """The whole point: the solver's core order must not decide anything."""
         rules = [_rule("fof(excl, axiom, ![X] : ~(p(X) & q(X))).")]
         beliefs = {
-            "p(x)": {"belief_context": "user", "confidence": 0.5, "truth_value": True},
-            "q(x)": {"belief_context": "observation", "confidence": 0.9, "truth_value": True},
+            "p(x)": {"atom": "p(x)", "stance": "asserted", "confidence": 0.5, "truth_value": True},
+            "q(x)": {"atom": "q(x)", "stance": "asserted", "confidence": 0.9, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         forward = select_verified_revision_target(core, beliefs, mapping, rules)
@@ -229,8 +229,8 @@ class TestHypothesisIsReadFromBeliefContext:
     def test_belief_context_hypothesis_outranks_a_lower_confidence_assertion(self) -> None:
         rules = [_rule("fof(excl, axiom, ![X] : ~(p(X) & q(X))).")]
         beliefs = {
-            "p(x)": {"belief_context": "hypothesis", "confidence": 0.9, "truth_value": True},
-            "q(x)": {"belief_context": "user", "confidence": 0.3, "truth_value": True},
+            "p(x)": {"atom": "p(x)", "stance": "hypothesis", "confidence": 0.9, "truth_value": True},
+            "q(x)": {"atom": "q(x)", "stance": "asserted", "confidence": 0.3, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         target = select_verified_revision_target(core, beliefs, mapping, rules)
@@ -247,8 +247,14 @@ class TestHypothesisIsReadFromBeliefContext:
         """
         rules = [_rule("fof(excl, axiom, ![X] : ~(p(X) & q(X))).")]
         beliefs = {
-            "p(x)": {"role": "hypothesis", "confidence": 0.9, "truth_value": True},
-            "q(x)": {"role": "user", "confidence": 0.3, "truth_value": True},
+            "p(x)": {
+                "atom": "p(x)",
+                "stance": "asserted",
+                "role": "hypothesis",
+                "confidence": 0.9,
+                "truth_value": True,
+            },
+            "q(x)": {"atom": "q(x)", "stance": "asserted", "role": "user", "confidence": 0.3, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         target = select_verified_revision_target(core, beliefs, mapping, rules)
@@ -270,9 +276,9 @@ class TestLinkDerivedClauses:
             implication_targets={"cat": {"animal"}},
         )
         beliefs = {
-            "cat(x)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-            "animal(x)": {"belief_context": "observation", "confidence": 0.9, "truth_value": False},
-            "mineral(x)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
+            "cat(x)": {"atom": "cat(x)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
+            "animal(x)": {"atom": "animal(x)", "stance": "asserted", "confidence": 0.9, "truth_value": False},
+            "mineral(x)": {"atom": "mineral(x)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
         }
         core, mapping = _core_with_links(beliefs, constraints)
 
@@ -290,9 +296,24 @@ class TestLinkDerivedClauses:
         # and picks the lowest-confidence atom.
         constraints = PredicateConstraints(functional_predicates=("lives_in",))
         beliefs = {
-            "lives_in(alice, tokyo)": {"belief_context": "observation", "confidence": 0.9, "truth_value": True},
-            "lives_in(alice, osaka)": {"belief_context": "observation", "confidence": 0.5, "truth_value": True},
-            "lives_in(alice, kyoto)": {"belief_context": "observation", "confidence": 0.8, "truth_value": True},
+            "lives_in(alice, tokyo)": {
+                "atom": "lives_in(alice, tokyo)",
+                "stance": "asserted",
+                "confidence": 0.9,
+                "truth_value": True,
+            },
+            "lives_in(alice, osaka)": {
+                "atom": "lives_in(alice, osaka)",
+                "stance": "asserted",
+                "confidence": 0.5,
+                "truth_value": True,
+            },
+            "lives_in(alice, kyoto)": {
+                "atom": "lives_in(alice, kyoto)",
+                "stance": "asserted",
+                "confidence": 0.8,
+                "truth_value": True,
+            },
         }
         core, mapping = _core_with_links(beliefs, constraints)
         target = select_verified_revision_target(core, beliefs, mapping, [], links=constraints)
@@ -308,8 +329,18 @@ class TestLinkDerivedClauses:
         # inviolable belief revisable, it only relaxes what counts as verified.
         constraints = PredicateConstraints(functional_predicates=("lives_in",))
         beliefs = {
-            "lives_in(alice, tokyo)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-            "lives_in(alice, osaka)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
+            "lives_in(alice, tokyo)": {
+                "atom": "lives_in(alice, tokyo)",
+                "stance": "asserted",
+                "confidence": 1.0,
+                "truth_value": True,
+            },
+            "lives_in(alice, osaka)": {
+                "atom": "lives_in(alice, osaka)",
+                "stance": "asserted",
+                "confidence": 1.0,
+                "truth_value": True,
+            },
         }
         core, mapping = _core_with_links(beliefs, constraints)
         assert select_verified_revision_target(core, beliefs, mapping, [], links=constraints) is None
@@ -317,8 +348,8 @@ class TestLinkDerivedClauses:
     def test_empty_constraints_match_the_previous_behavior(self) -> None:
         rules = [_rule("fof(excl, axiom, ![X] : ~(human(X) & robot(X))).")]
         beliefs = {
-            "human(x)": {"belief_context": "user", "confidence": 0.95, "truth_value": True},
-            "robot(x)": {"belief_context": "observation", "confidence": 0.9, "truth_value": True},
+            "human(x)": {"atom": "human(x)", "stance": "asserted", "confidence": 0.95, "truth_value": True},
+            "robot(x)": {"atom": "robot(x)", "stance": "asserted", "confidence": 0.9, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         without = select_verified_revision_target(core, beliefs, mapping, rules)
@@ -335,8 +366,8 @@ class TestNoResolvableFact:
         # Two pinned user facts under an exclusion: neither is revisable.
         rules = [_rule("fof(excl, axiom, ![X] : ~(p(X) & q(X))).")]
         beliefs = {
-            "p(c)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-            "q(c)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
+            "p(c)": {"atom": "p(c)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
+            "q(c)": {"atom": "q(c)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, rules)
         assert select_verified_revision_target(core, beliefs, mapping, rules) is None

@@ -11,7 +11,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from endoxa.governance.metadata import atom_text, validate_atom_ids
+from endoxa.errors import InvalidArgumentError
+from endoxa.governance.metadata import atom_text, canonical_atom, validate_atom_ids, validate_id
+from endoxa.governance.query import EntailmentResult, check_entailment
 from endoxa.governance.revision.facts import parse_fact_to_expr
 from endoxa.governance.revision.links import PredicateConstraints, PredicateLink, predicate_clauses
 from endoxa.governance.revision.preference import is_hypothesis, preference_bands, revision_candidates
@@ -36,10 +38,9 @@ _UNSETTLEABLE_ARITY = 2
 def build_assumptions(beliefs: dict[str, dict[str, Any]]) -> tuple[list[Expr], dict[str, str]]:
     """Build the solver assumption list and a stringified-expression -> node-id mapping.
 
-    An explicit atom is used when present, otherwise the legacy node ID is
-    parsed. Explicit maps reject malformed atoms and duplicate atom ownership;
-    legacy unparseable facts remain skipped. The mapping translates an UNSAT
-    core back to IDs without interpreting IDs as formulas in the explicit case.
+    Every row requires an explicit flat ground atom. Malformed atoms, missing
+    atoms and duplicate ownership are refused rather than skipped. The mapping
+    translates an UNSAT core back to IDs without interpreting IDs as formulas.
 
     Args:
         beliefs: Mapping of belief node ID to its data (``truth_value``, ``role``, ``confidence``).
@@ -52,10 +53,7 @@ def build_assumptions(beliefs: dict[str, dict[str, Any]]) -> tuple[list[Expr], d
     expr_to_node_id: dict[str, str] = {}
 
     for node_id, data in beliefs.items():
-        try:
-            expr = parse_fact_to_expr(atom_text(node_id, data))
-        except Exception:  # noqa: BLE001, S112 - silently skip facts that cannot be parsed
-            continue
+        expr = parse_fact_to_expr(atom_text(node_id, data))
 
         truth_val = data.get("truth_value", True)
         ass_expr = expr if truth_val else Not(expr)
@@ -100,66 +98,35 @@ def check_consistency(
     return result, unsat_core, expr_to_node_id
 
 
-def entails(
+def check_atom_support(
     beliefs: dict[str, dict[str, Any]],
     rule_exprs: list[Expr],
-    target: str,
+    atom: str,
     *,
     max_rounds: int | None = None,
     max_matches: int | None = None,
-) -> Literal["ENTAILED", "NOT_ENTAILED", "UNKNOWN"]:
-    """Decide whether ``target`` is entailed by the beliefs under the given rules.
+) -> EntailmentResult:
+    """Check independent support for an atom that need not already be held.
 
-    Pure (no events, no mutation). Runs a refutation query: assert the rules as
-    hard constraints, take the belief atoms plus the *negation* of ``target`` as
-    assumptions, and check satisfiability. If the negation cannot be satisfied
-    alongside the beliefs and rules, ``target`` is entailed. This reuses the same
-    solver machinery as :func:`check_consistency` so belief verification
-     rests on the same epistemic core as contradiction detection.
-
-    The target atom's own presence among ``beliefs`` is excluded from the
-    assumptions: verifying whether ``target`` follows must not take
-    ``target`` itself as a premise, or the query is vacuous -- a belief atom that
-    is merely present would trivially entail itself (``P`` and ``Not(P)`` in the
-    same assumption set). This is what cautious verification is for: checking
-    whether a precondition is genuinely entailed by the *rest*
-    of the beliefs and the axiom network, rather than trusted at face value
-    because it happens to sit on the host's belief store.
-
-    Args:
-        beliefs: Mapping of belief node ID to its data (``truth_value`` etc.).
-        rule_exprs: The active rule expressions to assert as hard constraints.
-        target: The atom to verify, as a fact string (e.g. ``"mortal(socrates)"``).
-        max_rounds: Optional E-matching round cap per solver check.
-            When exceeded the verdict is ``"UNKNOWN"``.
-        max_matches: Optional candidate-binding cap per solver check, across its rounds.
-
-    Returns:
-        ``"ENTAILED"`` when the negation is unsatisfiable (target provable),
-        ``"NOT_ENTAILED"`` when a counter-model exists, or ``"UNKNOWN"`` when the
-        target cannot be parsed or the check is cut before converging.
+    Exclude the atom in both polarities, certify remaining premises as SAT,
+    then query its positive form. Inconsistent or inconclusive premises are
+    never evidence. Invalid inputs raise errors rather than returning UNKNOWN.
     """
-    try:
-        target_expr = parse_fact_to_expr(target)
-    except Exception:  # noqa: BLE001 - an unparseable target is simply not verifiable
-        return "UNKNOWN"
-
-    solver = Solver()
-    for expr in rule_exprs:
-        solver.add(expr)
-    assumptions, _ = build_assumptions(beliefs)
-    # Drop the target atom in either polarity so its own presence is never a
-    # premise for its own proof. Only OTHER beliefs + rules may entail it.
-    negated_target = Not(target_expr)
-    excluded = {str(target_expr), str(negated_target)}
-    assumptions = [a for a in assumptions if str(a) not in excluded]
-    assumptions.append(negated_target)
-    result = solver.check(*assumptions, max_rounds=max_rounds, max_matches=max_matches)
-    if result == "UNSAT":
-        return "ENTAILED"
-    if result == "SAT":
-        return "NOT_ENTAILED"
-    return "UNKNOWN"
+    target = parse_fact_to_expr(canonical_atom(atom))
+    # A support query has no core-to-ID attribution: multiple observations of
+    # one atom are valid, and all polarities of the queried atom are excluded.
+    assumptions = []
+    for node_id, data in beliefs.items():
+        validate_id(node_id)
+        truth_value = data.get("truth_value", True)
+        if not isinstance(truth_value, bool):
+            msg = f"Belief truth_value must be a bool: {node_id!r}"
+            raise InvalidArgumentError(msg)
+        expr = parse_fact_to_expr(atom_text(node_id, data))
+        assumptions.append(expr if truth_value else Not(expr))
+    excluded = {str(target), str(Not(target))}
+    remaining = [expr for expr in assumptions if str(expr) not in excluded]
+    return check_entailment([*rule_exprs, *remaining], target, max_rounds=max_rounds, max_matches=max_matches)
 
 
 def find_rule_culprits(  # noqa: PLR0913 - preserve existing inputs plus the two solver caps
@@ -261,12 +228,18 @@ def find_supporting_rules(  # noqa: PLR0913 - preserve existing inputs plus the 
     # this guard an underivable target would report every rule as a support,
     # since dropping any of them leaves it just as underivable. An inconclusive
     # verdict stops here too, for the reason above.
-    if entails(beliefs, active_rule_exprs, target, max_rounds=max_rounds, max_matches=max_matches) != "ENTAILED":
+    if (
+        check_atom_support(beliefs, active_rule_exprs, target, max_rounds=max_rounds, max_matches=max_matches).verdict
+        != "ENTAILED"
+    ):
         return []
     supports: list[Expr] = []
     for rule in defeasible_rule_exprs:
         reduced = [r for r in active_rule_exprs if r is not rule]
-        if entails(beliefs, reduced, target, max_rounds=max_rounds, max_matches=max_matches) == "NOT_ENTAILED":
+        if (
+            check_atom_support(beliefs, reduced, target, max_rounds=max_rounds, max_matches=max_matches).verdict
+            == "NOT_ENTAILED"
+        ):
             supports.append(rule)
     return supports
 
@@ -308,12 +281,12 @@ def find_link_culprits(
 
     Returns:
         The links whose removal restores SAT, in the deterministic order of
-        :meth:`PredicateConstraints.acquired_links`.
+        :meth:`PredicateConstraints.revision_candidates`.
     """
     if links is None or links.is_empty():
         return []
     culprits: list[PredicateLink] = []
-    for link in links.acquired_links():
+    for link in links.revision_candidates():
         reduced_clauses = predicate_clauses(beliefs, links.without(link))
         result, _, _ = check_consistency(
             beliefs, [*active_rule_exprs, *reduced_clauses], max_rounds=max_rounds, max_matches=max_matches

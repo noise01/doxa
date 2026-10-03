@@ -22,8 +22,8 @@ constraints = Constraints(
 # Turn 3: the user says it. Turn 24: the agent says the opposite of what follows,
 # and says it less firmly, which is the whole of what the preference needs.
 beliefs = [
-    Belief(target="human(socrates)", truth_value=True, confidence=1.0, context="user"),
-    Belief(target="mortal(socrates)", truth_value=False, confidence=0.6, context="agent"),
+    Belief(truth_value=True, confidence=1.0, id="human(socrates)", atom="human(socrates)", stance="asserted"),
+    Belief(truth_value=False, confidence=0.6, id="mortal(socrates)", atom="mortal(socrates)", stance="asserted"),
 ]
 
 outcome = govern(beliefs, constraints)
@@ -42,7 +42,16 @@ print()
 # The operations are data. A host appends them to its ledger and applies them to
 # its own store; nothing above mutated anything.
 ledger = [
-    LedgerOp(op="assert", target=b.target, actor=b.context, truth_value=b.truth_value, confidence=b.confidence)
+    LedgerOp(
+        op="assert",
+        target=b.id,
+        actor="example",
+        atom=b.atom,
+        stance=b.stance,
+        source=b.source,
+        truth_value=b.truth_value,
+        confidence=b.confidence,
+    )
     for b in beliefs
 ]
 ledger += list(outcome.ops)

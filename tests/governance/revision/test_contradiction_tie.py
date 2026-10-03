@@ -35,7 +35,7 @@ def _core_for(beliefs: dict[str, dict[str, Any]], rule_exprs: list[Expr]) -> tup
 
 
 def _user(*, truth_value: bool = True, confidence: float = 1.0) -> dict[str, Any]:
-    return {"belief_context": "user", "confidence": confidence, "truth_value": truth_value}
+    return {"stance": "asserted", "confidence": confidence, "truth_value": truth_value}
 
 
 # Two inviolable beliefs that cannot both hold: the canonical tie.
@@ -43,7 +43,7 @@ _EXCLUSION_RULE = _rule("fof(excl, axiom, ![X] : ~(alive(X) & dead(X))).")
 
 
 def _exclusion_tie() -> dict[str, dict[str, Any]]:
-    return {"alive(felix)": _user(), "dead(felix)": _user()}
+    return {"alive(felix)": {"atom": "alive(felix)", **_user()}, "dead(felix)": {"atom": "dead(felix)", **_user()}}
 
 
 class TestPairGate:
@@ -63,9 +63,9 @@ class TestPairGate:
         # one yes/no cannot settle it, so the tie gate must decline.
         rules = [_rule("fof(triple, axiom, ![X] : ~(alive(X) & dead(X) & buried(X))).")]
         beliefs = {
-            "alive(felix)": _user(),
-            "dead(felix)": _user(),
-            "buried(felix)": _user(),
+            "alive(felix)": {"atom": "alive(felix)", **_user()},
+            "dead(felix)": {"atom": "dead(felix)", **_user()},
+            "buried(felix)": {"atom": "buried(felix)", **_user()},
         }
         core, mapping = _core_for(beliefs, rules)
         assert select_tie_question_target(core, beliefs, mapping, rules) is None
@@ -74,7 +74,7 @@ class TestPairGate:
         # A rule that outright forbids the only asserted atom: nobody to weigh it
         # against, so there is no two-way question to ask.
         rules = [_rule("fof(no_ghosts, axiom, ~ghost(felix)).")]
-        beliefs = {"ghost(felix)": _user()}
+        beliefs = {"ghost(felix)": {"atom": "ghost(felix)", **_user()}}
         core, mapping = _core_for(beliefs, rules)
         assert select_tie_question_target(core, beliefs, mapping, rules) is None
 
@@ -91,14 +91,20 @@ class TestPreferenceGate:
     def test_unequal_confidence_pair_is_not_a_tie(self) -> None:
         # The preference separates these, so revision settles it and the conflict
         # never reaches the question path.
-        beliefs = {"alive(felix)": _user(), "dead(felix)": _user(confidence=0.5)}
+        beliefs = {
+            "alive(felix)": {"atom": "alive(felix)", **_user()},
+            "dead(felix)": {"atom": "dead(felix)", **_user(confidence=0.5)},
+        }
         core, mapping = _core_for(beliefs, [_EXCLUSION_RULE])
         assert select_tie_question_target(core, beliefs, mapping, [_EXCLUSION_RULE]) is None
 
     def test_equal_confidence_fallible_pair_is_a_tie(self) -> None:
         # Two user assertions carry the same interlocutor
         # confidence, so nothing in the preference tells them apart.
-        beliefs = {"alive(felix)": _user(confidence=0.95), "dead(felix)": _user(confidence=0.95)}
+        beliefs = {
+            "alive(felix)": {"atom": "alive(felix)", **_user(confidence=0.95)},
+            "dead(felix)": {"atom": "dead(felix)", **_user(confidence=0.95)},
+        }
         core, mapping = _core_for(beliefs, [_EXCLUSION_RULE])
         tie = select_tie_question_target(core, beliefs, mapping, [_EXCLUSION_RULE])
         assert tie is not None
@@ -110,8 +116,8 @@ class TestPreferenceGate:
         # into a question. A conflict between conjectures wants evidence, not the
         # user's attention.
         beliefs = {
-            "alive(felix)": {"belief_context": "hypothesis", "confidence": 0.5, "truth_value": True},
-            "dead(felix)": {"belief_context": "hypothesis", "confidence": 0.5, "truth_value": True},
+            "alive(felix)": {"atom": "alive(felix)", "stance": "hypothesis", "confidence": 0.5, "truth_value": True},
+            "dead(felix)": {"atom": "dead(felix)", "stance": "hypothesis", "confidence": 0.5, "truth_value": True},
         }
         core, mapping = _core_for(beliefs, [_EXCLUSION_RULE])
         assert select_tie_question_target(core, beliefs, mapping, [_EXCLUSION_RULE]) is None
@@ -121,7 +127,7 @@ class TestPreferenceGate:
         # a hypothesis sits in its own band, so revision settles the pair rather
         # than declining it.
         beliefs = _exclusion_tie()
-        beliefs["dead(felix)"] = {"belief_context": "hypothesis", "confidence": 1.0, "truth_value": True}
+        beliefs["dead(felix)"] = {"atom": "dead(felix)", "stance": "hypothesis", "confidence": 1.0, "truth_value": True}
         core, mapping = _core_for(beliefs, [_EXCLUSION_RULE])
         assert select_tie_question_target(core, beliefs, mapping, [_EXCLUSION_RULE]) is None
 
@@ -154,7 +160,10 @@ class TestPolarity:
     def test_same_truth_value_when_both_are_denied(self) -> None:
         # Both held false under a rule demanding one of them: still a split.
         rules = [_rule("fof(one_of, axiom, ![X] : (alive(X) | dead(X))).")]
-        beliefs = {"alive(felix)": _user(truth_value=False), "dead(felix)": _user(truth_value=False)}
+        beliefs = {
+            "alive(felix)": {"atom": "alive(felix)", **_user(truth_value=False)},
+            "dead(felix)": {"atom": "dead(felix)", **_user(truth_value=False)},
+        }
         core, mapping = _core_for(beliefs, rules)
         tie = select_tie_question_target(core, beliefs, mapping, rules)
         assert tie is not None
@@ -166,7 +175,10 @@ class TestPolarity:
         # animal(felix)=F, cat(felix)=T under cat => animal: the conflict is
         # between a claim and a denial, so affirming one affirms the other.
         rules = [_rule("fof(impl, axiom, ![X] : (cat(X) => animal(X))).")]
-        beliefs = {"animal(felix)": _user(truth_value=False), "cat(felix)": _user()}
+        beliefs = {
+            "animal(felix)": {"atom": "animal(felix)", **_user(truth_value=False)},
+            "cat(felix)": {"atom": "cat(felix)", **_user()},
+        }
         core, mapping = _core_for(beliefs, rules)
         tie = select_tie_question_target(core, beliefs, mapping, rules)
         assert tie is not None
@@ -215,7 +227,10 @@ class TestLinkDerivedTies:
 
     def test_implication_tie(self) -> None:
         constraints = PredicateConstraints(implication_targets={"cat": ("animal",)})
-        beliefs = {"animal(felix)": _user(truth_value=False), "cat(felix)": _user()}
+        beliefs = {
+            "animal(felix)": {"atom": "animal(felix)", **_user(truth_value=False)},
+            "cat(felix)": {"atom": "cat(felix)", **_user()},
+        }
         clauses = predicate_clauses(beliefs, constraints)
         core, mapping = _core_for(beliefs, clauses)
         tie = select_tie_question_target(core, beliefs, mapping, [], links=constraints)

@@ -9,8 +9,8 @@ store.
   not yet being governed; this is the part that makes a host governable.
 - :mod:`~endoxa.governance.ledger` declares the seven operations as an append-only
   schema.
-- :mod:`~endoxa.governance.derive` recovers the operation series from a host's
-  audit log, read-only.
+- :mod:`~endoxa.governance.derive` optionally converts the supported legacy
+  audit-row dialect into operations, read-only. Direct ledger use needs no events.
 - :mod:`~endoxa.governance.view` folds the series back into a current view, in
   which an unsettleable conflict is a state with a name
   (:data:`~endoxa.governance.view.UNRESOLVED`) rather than a silent choice.

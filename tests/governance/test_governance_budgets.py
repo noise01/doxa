@@ -5,8 +5,8 @@ import pytest
 from endoxa.governance import Belief, Constraints, GovernanceOutcome, Rule, govern
 from endoxa.governance.revision import (
     PredicateConstraints,
+    check_atom_support,
     check_consistency,
-    entails,
     find_link_culprits,
     find_rule_culprits,
     find_supporting_rules,
@@ -21,7 +21,11 @@ EXCLUSION = "fof(excl, axiom, ~(p(a) & q(a)))."
 
 
 def test_unknown_is_not_a_consistency_certificate():
-    outcome = govern([Belief("p(a)", truth_value=True, confidence=1.0)], Constraints(hard_axioms=(LOOP,)), max_rounds=2)
+    outcome = govern(
+        [Belief(truth_value=True, confidence=1.0, id="p(a)", atom="p(a)", stance="asserted")],
+        Constraints(hard_axioms=(LOOP,)),
+        max_rounds=2,
+    )
     assert outcome.consistent is None
     assert outcome.ops == ()
     assert outcome.hold is None
@@ -30,7 +34,9 @@ def test_unknown_is_not_a_consistency_certificate():
 
 def test_a_match_work_cut_is_inconclusive_too():
     outcome = govern(
-        [Belief("p(a)", truth_value=True, confidence=1.0)], Constraints(hard_axioms=(IMPLICATION,)), max_matches=0
+        [Belief(truth_value=True, confidence=1.0, id="p(a)", atom="p(a)", stance="asserted")],
+        Constraints(hard_axioms=(IMPLICATION,)),
+        max_matches=0,
     )
     assert outcome.consistent is None
     assert outcome.ops == ()
@@ -59,8 +65,8 @@ def test_govern_bounds_every_fact_rule_and_tie_recheck(monkeypatch, confidence, 
     monkeypatch.setattr(Solver, "check", bounded_check)
     outcome = govern(
         [
-            Belief("p(a)", truth_value=True, confidence=confidence),
-            Belief("q(a)", truth_value=True, confidence=confidence),
+            Belief(truth_value=True, confidence=confidence, id="p(a)", atom="p(a)", stance="asserted"),
+            Belief(truth_value=True, confidence=confidence, id="q(a)", atom="q(a)", stance="asserted"),
         ],
         Constraints(rules=(Rule("excl", EXCLUSION, 1.0, defeasible=defeasible),)),
         max_rounds=2,
@@ -74,29 +80,33 @@ def test_govern_bounds_every_fact_rule_and_tie_recheck(monkeypatch, confidence, 
 
 
 def test_low_level_queries_bound_work_and_keep_unknown():
-    beliefs = {"p(a)": {"truth_value": True, "confidence": 1.0}}
+    beliefs = {"p(a)": {"atom": "p(a)", "stance": "asserted", "truth_value": True, "confidence": 1.0}}
     rules = [parse_fof(IMPLICATION)[2]]
     assert check_consistency(beliefs, rules, max_matches=0)[0] == "UNKNOWN"
-    assert entails(beliefs, rules, "q(a)", max_matches=0) == "UNKNOWN"
+    assert check_atom_support(beliefs, rules, "q(a)", max_matches=0).verdict == "UNKNOWN"
     assert find_supporting_rules(beliefs, rules, rules, "q(a)", max_matches=0) == []
 
 
 def test_rule_rechecks_do_not_accept_an_inconclusive_removal():
-    beliefs = {"p(a)": {"truth_value": True, "confidence": 1.0}}
+    beliefs = {"p(a)": {"atom": "p(a)", "stance": "asserted", "truth_value": True, "confidence": 1.0}}
     loop = parse_fof(LOOP)[2]
     conflict = parse_fof("fof(no, axiom, ~p(a)).")[2]
     assert find_rule_culprits(beliefs, [loop, conflict], [conflict], max_rounds=2, max_matches=32) == []
 
 
 def test_link_rechecks_do_not_accept_an_inconclusive_removal():
-    beliefs = {name: {"truth_value": True, "confidence": 0.6} for name in ("p(a)", "q(a)")}
+    beliefs = {
+        name: {"atom": name, "stance": "asserted", "truth_value": True, "confidence": 0.6} for name in ("p(a)", "q(a)")
+    }
     links = PredicateConstraints(exclusion_targets={"p": ("q",)})
     assert find_link_culprits(beliefs, [parse_fof(LOOP)[2]], links, max_rounds=2, max_matches=32) == []
 
 
 @pytest.mark.parametrize("selector", [select_verified_revision_target, select_tie_question_target])
 def test_fact_and_tie_completions_preserve_work_limits(selector):
-    beliefs = {name: {"truth_value": True, "confidence": 0.6} for name in ("p(a)", "q(a)")}
+    beliefs = {
+        name: {"atom": name, "stance": "asserted", "truth_value": True, "confidence": 0.6} for name in ("p(a)", "q(a)")
+    }
     result, core, mapping = check_consistency(beliefs, [parse_fof(EXCLUSION)[2]])
     assert result == "UNSAT"
     # After either flip the loop is relevant to the remaining p(a), or a
@@ -126,7 +136,10 @@ def test_existing_round_cap_reaches_rule_removal(monkeypatch):
 
     monkeypatch.setattr(Solver, "check", bounded_check)
     govern(
-        [Belief("p(a)", truth_value=True, confidence=0.6), Belief("q(a)", truth_value=True, confidence=0.6)],
+        [
+            Belief(truth_value=True, confidence=0.6, id="p(a)", atom="p(a)", stance="asserted"),
+            Belief(truth_value=True, confidence=0.6, id="q(a)", atom="q(a)", stance="asserted"),
+        ],
         Constraints(rules=(Rule("excl", EXCLUSION, 1.0),)),
         max_rounds=2,
     )
@@ -135,9 +148,9 @@ def test_existing_round_cap_reaches_rule_removal(monkeypatch):
 
 
 def test_support_rechecks_do_not_turn_unknown_into_a_lost_support():
-    beliefs = {"p(a)": {"truth_value": True, "confidence": 1.0}}
+    beliefs = {"p(a)": {"atom": "p(a)", "stance": "asserted", "truth_value": True, "confidence": 1.0}}
     implication = parse_fof(IMPLICATION)[2]
     loop = parse_fof(LOOP)[2]
     rules = [implication, loop]
-    assert entails(beliefs, rules, "q(a)", max_rounds=2, max_matches=32) == "ENTAILED"
+    assert check_atom_support(beliefs, rules, "q(a)", max_rounds=2, max_matches=32).verdict == "UNKNOWN"
     assert find_supporting_rules(beliefs, rules, [implication], "q(a)", max_rounds=2, max_matches=32) == []

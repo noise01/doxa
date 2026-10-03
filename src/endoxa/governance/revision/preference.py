@@ -19,14 +19,8 @@ Pure and basis-independent (governance tier): stdlib only.
 from collections.abc import Iterator
 from typing import Any
 
+from endoxa.errors import InvalidArgumentError
 from endoxa.governance.metadata import validate_stance
-
-# An atom's role is read from ``belief_context``, not from ``role``. A write takes
-# a role argument and stores it under that key; the stored belief has no ``role``
-# field at all. Reading ``role`` here matched nothing, which left the policy of
-# retracting a conjecture before an assertion inert without ever failing.
-_ROLE_KEY = "belief_context"
-_HYPOTHESIS = "hypothesis"
 
 # Confidence is a float that evidence folding moves by Laplace smoothing, so
 # exact equality would let a 1e-16 difference slip a genuine tie through and back
@@ -44,23 +38,13 @@ _DEFAULT_CONFIDENCE = 1.0
 
 
 def is_hypothesis(data: dict[str, Any]) -> bool:
-    """Whether a belief was put forward as a conjecture rather than asserted.
-
-    A host posts its guesses this way. A hypothesis is the first
-    thing revision reaches for, ahead of an asserted belief of the very same
-    confidence -- being offered as a guess is itself a reason to doubt it first.
-
-    Known limitation: ``belief_context`` is not fixed at birth. A host that
-    rewrites a belief under a different role -- revision writing it back as the
-    agent's own, say -- makes it stop reading as a hypothesis. Making the
-    distinction permanent means giving a belief a birth record that a later write
-    cannot overwrite, which is more than this predicate can do on its own.
-    """
+    """Read explicit stance without interpreting writer roles or source kinds."""
     stance = data.get("stance")
-    if stance is not None:
-        validate_stance(stance)
-        return bool(stance == _HYPOTHESIS)
-    return data.get(_ROLE_KEY) == _HYPOTHESIS
+    validate_stance(stance)
+    if stance is None:
+        msg = "Revision preference requires an explicit stance"
+        raise InvalidArgumentError(msg)
+    return bool(stance == "hypothesis")
 
 
 def confidence_of(data: dict[str, Any]) -> float:

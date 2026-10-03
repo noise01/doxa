@@ -6,6 +6,31 @@ not a promise.
 
 ## [Unreleased]
 
+### Changed
+
+- `Belief` now requires keyword-only `id`, `atom`, `truth_value`, `confidence`
+  and `stance`; `source` remains optional. `target`, `context`, `from_atom`
+  and role-based inference are removed. Record codecs require explicit fields.
+- Revision maps require an `atom` field and explicit `stance` when preference
+  is consulted. Missing or malformed atoms are refused. The protected default
+  for unmarked confidence remains part of revision policy.
+- `check_atom_support` replaces `entails` with a consistency-guarded
+  `EntailmentResult`, including `INCONSISTENT_PREMISES`. It can query an unheld
+  atom and excludes all observations of the queried atom in both polarities.
+  Support-rule attribution uses the same guard.
+- `revision_candidates` replaces `acquired_links`; `to_tptp_expr` replaces
+  `to_tptp`. Enumeration and expression-body serialization are unchanged.
+- Governance rules and hard axioms use strict premise validation. The general
+  `parse_fof` parser remains available for reading other FOF roles.
+
+### Added
+
+- `BoundVarExpr` and `Pattern` are exported from `endoxa.solver` for AST type
+  checks. Existing factories retain their construction behavior.
+- Standalone examples and documentation distinguish direct `LedgerOp` use from
+  the optional audit-row adapter. Historic ledger replay, missing metadata and
+  audit-row conversion remain supported without rewriting persisted data.
+
 ## [0.5.0]
 
 This pre-1.0 minor release adds guarded queries and explicit belief identity,

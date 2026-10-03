@@ -1,7 +1,6 @@
 """Consistency-guarded entailment and independent belief support.
 
-These queries do not revise beliefs or apply ledger operations. Unlike the
-legacy revision ``entails`` query, they first require consistent premises.
+These queries first require consistent premises and never apply ledger operations.
 """
 
 from collections.abc import Sequence
@@ -10,9 +9,7 @@ from typing import Literal
 
 from endoxa.errors import InvalidArgumentError
 from endoxa.governance.formulas import _validate_formula
-from endoxa.governance.metadata import canonical_atom
-from endoxa.governance.resolution import Belief
-from endoxa.governance.revision.facts import parse_fact_to_expr
+from endoxa.governance.metadata import Belief, canonical_atom
 from endoxa.solver import Expr, Not, Solver
 
 SolverStatus = Literal["SAT", "UNSAT", "UNKNOWN"]
@@ -100,10 +97,9 @@ def check_belief_support(  # noqa: PLR0913 - keep the query polarity and both pe
 ) -> EntailmentResult:
     """Check support after excluding all beliefs with the target's atom.
 
-    Belief.atom is used when explicit; otherwise the legacy target is the atom
-    text. Flat ground atoms use lower-case predicates and constant arguments.
-    Arbitrary IDs require an explicit atom; nested terms and general formula
-    beliefs are not accepted. Whitespace variants denote the same atom, even with different
+    Each Belief has a separate ID and atom. Flat ground atoms use lower-case
+    predicates and constant arguments; nested terms and general formula beliefs
+    are not accepted. Whitespace variants denote the same atom, even with different
     IDs or truth values. All such beliefs are excluded, in either polarity.
 
     The named target must exist. Its stored truth value does not choose the
@@ -112,6 +108,9 @@ def check_belief_support(  # noqa: PLR0913 - keep the query polarity and both pe
     atoms raise RuleSyntaxError. Nothing is silently skipped. Remaining beliefs
     and all supplied rules go through check_entailment's consistency guard.
     """
+    # Avoid importing revision while the public query module is initializing.
+    from endoxa.governance.revision.facts import parse_fact_to_expr  # noqa: PLC0415
+
     if not isinstance(target_id, str):
         msg = "target_id must be a string"
         raise InvalidArgumentError(msg)
@@ -120,25 +119,25 @@ def check_belief_support(  # noqa: PLR0913 - keep the query polarity and both pe
         raise InvalidArgumentError(msg)
     atoms: dict[str, Expr] = {}
     for belief in beliefs:
-        if not isinstance(belief, Belief) or not isinstance(belief.target, str):
-            msg = "beliefs must contain Belief objects with string targets"
+        if not isinstance(belief, Belief) or not isinstance(belief.id, str):
+            msg = "beliefs must contain Belief objects with string IDs"
             raise InvalidArgumentError(msg)
-        if belief.target in atoms:
-            msg = f"Duplicate belief ID: {belief.target!r}"
+        if belief.id in atoms:
+            msg = f"Duplicate belief ID: {belief.id!r}"
             raise InvalidArgumentError(msg)
         if not isinstance(belief.truth_value, bool):
-            msg = f"Belief truth_value must be a bool: {belief.target!r}"
+            msg = f"Belief truth_value must be a bool: {belief.id!r}"
             raise InvalidArgumentError(msg)
-        atom = canonical_atom(belief.target if belief.atom is None else belief.atom)
-        atoms[belief.target] = parse_fact_to_expr(atom)
+        atom = canonical_atom(belief.atom)
+        atoms[belief.id] = parse_fact_to_expr(atom)
     if target_id not in atoms:
         msg = f"Target belief ID not found: {target_id!r}"
         raise InvalidArgumentError(msg)
     target = atoms[target_id]
     remaining = [
-        atoms[belief.target] if belief.truth_value else Not(atoms[belief.target])
+        atoms[belief.id] if belief.truth_value else Not(atoms[belief.id])
         for belief in beliefs
-        if str(atoms[belief.target]) != str(target)
+        if str(atoms[belief.id]) != str(target)
     ]
     conclusion = target if truth_value else Not(target)
     return check_entailment([*rule_exprs, *remaining], conclusion, max_rounds=max_rounds, max_matches=max_matches)

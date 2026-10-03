@@ -40,9 +40,7 @@ _EXCL = "fof(excl, axiom, ![X]: ~(alive(X) & dead(X)))."
 
 
 def _belief(belief_id, atom, *, truth=True, confidence=0.7, stance="asserted", source="user"):  # noqa: PLR0913 - query metadata
-    return Belief.from_atom(
-        id=belief_id, atom=atom, truth_value=truth, confidence=confidence, stance=stance, source=source
-    )
+    return Belief(id=belief_id, atom=atom, truth_value=truth, confidence=confidence, stance=stance, source=source)
 
 
 def _map(beliefs):
@@ -72,16 +70,15 @@ def _assert(belief, *, actor="writer", supports=()):
     )
 
 
-def test_old_positions_and_explicit_identity():
-    old = Belief("p(a)", True, 0.7, "user")  # noqa: FBT003 - legacy positional constructor
-    assert old.id == old.target == "p(a)"
-    assert old.atom is old.stance is old.source is None
-    new = _belief("id:17", "p( a , b )")
-    assert new.id == new.target == "id:17"
-    assert new.atom == "p(a,b)"
-    for name in ("atom", "stance", "source"):
+def test_explicit_identity_and_required_keyword_fields():
+    belief = _belief("id:17", "p( a , b )")
+    assert belief.id == "id:17"
+    assert belief.atom == "p(a,b)"
+    assert not hasattr(belief, "target")
+    for name in ("id", "atom", "truth_value", "confidence", "stance", "source"):
         assert inspect.signature(Belief).parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
-        assert inspect.signature(LedgerOp).parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
+    with pytest.raises(TypeError):
+        Belief("p", True, 0.7, "user")  # noqa: FBT003 - rejection of the removed positional contract
 
 
 @pytest.mark.parametrize("atom", [None, "", "p(X)", "p(f(a))", "p()", "p(a,,b)", "~p", "a=b"])
@@ -108,17 +105,11 @@ def test_bad_source_is_not_a_stance(source):
         _belief("id", "p", source=source)
 
 
-def test_context_is_only_a_legacy_policy_fallback():
-    assert is_hypothesis({"belief_context": "hypothesis"})
-    assert not is_hypothesis({"source": "derivation", "belief_context": "user"})
+def test_preference_requires_stance_without_role_inference():
+    with pytest.raises(InvalidArgumentError, match="stance"):
+        is_hypothesis({"belief_context": "hypothesis"})
     assert is_hypothesis({"stance": "hypothesis", "source": "user"})
     assert not is_hypothesis({"stance": "asserted", "source": "derivation"})
-    with pytest.raises(InvalidArgumentError, match="conflicts"):
-        Belief("id", True, 0.7, "user", atom="p", stance="hypothesis")  # noqa: FBT003 - legacy positional constructor
-    with pytest.raises(InvalidArgumentError, match="conflicts"):
-        Belief("id", True, 0.7, "hypothesis", atom="p", stance="asserted")  # noqa: FBT003 - legacy positional constructor
-    assert Belief("id", True, 0.7, "user", atom="p", stance="asserted").source is None  # noqa: FBT003 - legacy positional constructor
-    assert Belief("id", True, 0.7, "hypothesis", atom="p").stance is None  # noqa: FBT003 - legacy positional constructor
     assert not revision_candidates([("asserted", {"stance": "asserted", "confidence": 1.0})])
     assert revision_candidates([("guess", {"stance": "hypothesis", "confidence": 1.0})])
 
@@ -208,7 +199,7 @@ def test_rule_culprits_and_support_rules_work_with_ids():
     bad = _map([_belief("premise", "p(a)"), _belief("target", "q(a)", truth=False)])
     assert find_rule_culprits(bad, [rule], [rule]) == [rule]
     good = _map([_belief("premise", "p(a)"), _belief("target", "q(a)")])
-    # Legacy entails/support-rule target remains formula text, never silently an ID.
+    # Legacy check_atom_support/support-rule target remains formula text, never silently an ID.
     assert find_supporting_rules(good, [rule], [rule], "q(a)") == [rule]
 
 
@@ -222,13 +213,12 @@ def test_support_removes_all_id_aliases_and_both_polarities():
         build_assumptions(_map(beliefs))
 
 
-def test_new_records_restore_explicit_metadata_and_old_records_keep_omissions():
-    belief = _belief("opaque", "p(a)", stance="hypothesis", source="tool")
-    assert Belief.from_record(json.loads(json.dumps(belief.to_record()))) == belief
-    old = Belief.from_record({"target": "p(a)", "truth_value": True, "confidence": 0.7, "context": "hypothesis"})
-    assert old.atom is old.stance is old.source is None
+def test_records_restore_explicit_metadata_and_refuse_incomplete_fields():
+    belief = _belief("id", "p(a)", stance="hypothesis", source="tool")
+    assert Belief.from_record(belief.to_record()) == belief
+    assert Belief.from_record(asdict(belief)) == belief
     with pytest.raises(InvalidArgumentError):
-        Belief.from_record({"target": "missing"})
+        Belief.from_record({"target": "p(a)", "truth_value": True, "confidence": 0.7, "context": "user"})
 
 
 def test_ledger_roundtrip_preserves_identity_stance_source_and_support_ids():
@@ -324,7 +314,8 @@ def test_strict_premise_roles_and_rule_factory_preserve_names(role):
 def test_strict_premise_rejects_other_roles_without_changing_legacy(role):
     text = f"fof(original, {role}, p(a))."
     assert parse_fof(text)[1] == role
-    assert Rule("id", text, 0.8).axiom == text
+    with pytest.raises(RuleSyntaxError):
+        Rule("id", text, 0.8)
     with pytest.raises(RuleSyntaxError):
         parse_premise_fof(text)
     with pytest.raises(RuleSyntaxError):
@@ -346,7 +337,7 @@ def test_strict_fof_requires_closed_formula_and_one_complete_statement(formula):
 
 
 def test_public_factory_annotations_are_resolvable():
-    for method in [Belief.from_atom, Belief.from_record, Rule.from_fof, parse_premise_fof, parse_query_fof]:
+    for method in [Belief, Belief.from_record, Rule.from_fof, parse_premise_fof, parse_query_fof]:
         assert get_type_hints(method)
 
 
