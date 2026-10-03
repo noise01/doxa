@@ -6,6 +6,33 @@ not a promise.
 
 ## [Unreleased]
 
+## [0.6.0]
+
+This pre-1.0 minor release contains breaking API changes. Old constructors,
+implicit belief metadata and renamed entry points are removed without aliases.
+Migrate callers before upgrading; historic ledger replay remains supported.
+
+### Migration
+
+- Construct `Belief` with keyword-only `id`, `atom`, `truth_value`, `confidence`
+  and `stance`. Choose `asserted` or `hypothesis` explicitly; do not use `target`,
+  `context`, positional arguments or `Belief.from_atom`. Update record codecs to
+  carry the explicit fields. Optional `source` is independent of stance.
+- Supply `atom` in revision-map rows and `stance` where preference is consulted.
+  Invalid atoms are errors instead of silently omitted premises.
+- Replace `revision.entails` with `revision.check_atom_support` for independent
+  positive-atom support, including unheld atoms. Read `.verdict` and handle
+  `INCONSISTENT_PREMISES` separately from `UNKNOWN`. For a held belief ID and an
+  explicit query polarity, use `check_belief_support`. Both require SAT premises;
+  callers that need classical refutation can use the public `Solver` directly.
+- Replace `PredicateConstraints.acquired_links()` with `revision_candidates()`
+  and `to_tptp` with `to_tptp_expr`. Serializer output is an expression body.
+- Pass valid closed premise FOF to governance rules and hard axioms. General
+  `parse_fof` remains available for other roles, without certifying them as premises.
+- Keep historic ledger rows readable without inventing missing metadata. Strict
+  `BeliefState.to_belief()` needs recorded atom, stance and confidence; this
+  release does not provide a database migration or infer those fields.
+
 ### Changed
 
 - `Belief` now requires keyword-only `id`, `atom`, `truth_value`, `confidence`

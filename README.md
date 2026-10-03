@@ -258,7 +258,7 @@ formula as a valid governance premise.
 
 ## Upgrading from 0.5.0
 
-The unreleased API uses explicit belief fields and revision-map atoms. Migrate
+Version 0.6.0 uses explicit belief fields and revision-map atoms. Migrate
 callers before using it: `target` and `context`, `Belief.from_atom`, `entails`,
 `acquired_links` and `to_tptp` are removed. Use `Belief`, consistency-guarded
 support queries, `revision_candidates` and `to_tptp_expr` respectively.
