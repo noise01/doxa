@@ -6,6 +6,19 @@ not a promise.
 
 ## [Unreleased]
 
+## [0.5.0]
+
+This pre-1.0 minor release adds guarded queries and explicit belief identity,
+and corrects governance's treatment of inconclusive checks. Adopt it deliberately:
+`GovernanceOutcome.consistent` can now be `None`, and governance rejects duplicate
+belief IDs, duplicate atom ownership and belief/rule ID collisions. Distinguish
+UNKNOWN from a confirmed conflict rather than treating every falsey value alike.
+
+The explicit record and strict FOF entry points are additive. Legacy constructor
+positions, the permissive parser and `revision.entails` remain available. Old
+ledger replay still works without inventing metadata; only the new strict belief
+restore requires recorded atom, stance and confidence. Source is optional.
+
 ### Fixed
 
 - `govern` no longer reports an UNKNOWN solver verdict as consistent.
@@ -473,6 +486,8 @@ exists to get right has never once been taken outside a test.
 belief's footing and "was never exercised". It records nothing, and it is
 tested. The gap is the one stated above. See the 0.1.0 entry.)*
 
+[Unreleased]: https://github.com/noise01/endoxa/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/noise01/endoxa/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/noise01/endoxa/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/noise01/endoxa/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/noise01/endoxa/compare/v0.2.0...v0.2.1
