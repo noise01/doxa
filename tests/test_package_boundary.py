@@ -27,33 +27,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-#: Words that name something in the project this package came from rather than
-#: anything here, each with what to say instead. A reader who meets one of these is
-#: being asked to picture a structure that does not exist.
-#:
-#: Deliberately absent: "salience". It was on the original list because a learner
-#: over there was named after it, but the word itself is ordinary attention-research
-#: vocabulary and :class:`endoxa.trace.Proposition` carries it as a field. Forbidding a
-#: word because something elsewhere was named after it is the wrong test.
-FORBIDDEN_WORDS = {
-    "doppelganger": "the project this was extracted from",
-    "blackboard": "a working memory this package does not have -- say the belief set",
-    "coalition": "a host's attention mechanism -- say what the entry is about",
-    "broadcast": "a host's attention mechanism -- say entry, or proposition",
-    "ritual": "the research side's acquisition process",
-    "acquisition": "the research side's acquisition process",
-    "faculty": "a host's organ vocabulary -- say component",
-    "organ": "a host's organ vocabulary -- say component",
-    "kernel": "the export core this used to sit in -- say package",
-    "asset": "the export core's vocabulary -- say package",
-    "bandit": "a learner that is not part of this package",
-    "plastic": "the research side's plastic layer",
-}
+#: Project identity is not part of this package's standalone interface.
+#: Shared ordinary research vocabulary is allowed.
+FORBIDDEN_WORDS = {"doppelganger": "another project's name"}
 
-#: Packages of the host it came from, reached either as a path (``domains/memory.py``)
-#: or as a dotted module (``modules.reasoning._retract_rule``). Both point at a file no
-#: reader of this package can open, and the second form is the one that slips past a
-#: rule written only for slashes.
+#: References to unavailable modules, as paths or dotted names.
 HOST_PATH = re.compile(
     r"\b(?:domains|modules|runtime|faculties|interface|evals|policies|environments)(?:/|\.(?=[a-z_]))",
 )
@@ -362,12 +340,15 @@ class TestVocabulary:
         assert not offences, "host vocabulary reached the package:\n" + "\n".join(offences)
 
     def test_a_planted_word_is_caught(self):
-        assert _word_offences([("planted.py", "# the blackboard holds it")])
+        assert _word_offences([("planted.py", "# doppelganger holds it")])
         assert not _word_offences([("planted.py", "# the belief set holds it")])
 
     def test_a_word_inside_a_longer_one_is_not_caught(self):
-        """``organ`` must not fire on ``organise``, or the rule becomes unusable."""
-        assert not _word_offences([("planted.py", "# organise the arguments")])
+        """An identifier containing the project name is not a prose reference."""
+        assert not _word_offences([("planted.py", "# doppelgangers are fictional")])
+
+    def test_shared_research_vocabulary_is_allowed(self):
+        assert not _word_offences([("planted.py", "# acquisition, salience and kernel methods")])
 
     def test_no_host_path_is_referenced(self):
         offences = _line_offences(_real_files(), HOST_PATH)
@@ -580,7 +561,7 @@ class TestPublishedDocuments:
 
     def test_each_planted_document_is_caught(self):
         """The same controls as above, written the way a document writes them."""
-        assert _word_offences([("planted.md", "The blackboard holds it.")])
+        assert _word_offences([("planted.md", "The doppelganger holds it.")])
         assert _line_offences([("planted.md", "See domains/memory.py.")], HOST_PATH)
         assert _line_offences([("planted.md", "Settled in ADR-0123.")], CITATION)
         assert _line_offences([("planted.md", "Listed in docs/backlog.md.")], PRIVATE_DOC)

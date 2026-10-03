@@ -31,8 +31,7 @@ instead. The distinction is narrow and it matters: every tier must read the same
 *link set*, not synthesise the same *clauses* from it.
 
 Pure: stdlib, the sibling :mod:`.facts`, :mod:`endoxa.solver`, and the atom grammar
-in :mod:`endoxa.syntax`. Clauses are built from explicit belief atoms, with
-legacy node IDs as the fallback, via
+in :mod:`endoxa.syntax`. Clauses are built from required explicit belief atoms via
 :func:`parse_fact_to_expr`, the same parser :func:`.engine.build_assumptions`
 uses, so a synthesised clause's atom expressions are identical to the assumption
 expressions and the solver correlates them.
@@ -95,13 +94,12 @@ class PredicateConstraints:
         """Whether no link source is populated (so clause synthesis is a no-op)."""
         return not self.functional_predicates and not self.exclusion_targets and not self.implication_targets
 
-    def acquired_links(self) -> list[PredicateLink]:
+    def revision_candidates(self) -> list[PredicateLink]:
         """Enumerate the links the constraint set holds, as retraction candidates.
 
-        ``functional_predicates`` is deliberately excluded: it is a
-        config bootstrap standing in for a per-symbol link a host has not yet
-        elicited, not acquired data, and functional-exclusion clashes
-        are resolved by recency supersession before culprit search is reached.
+        Only exclusion and implication links are candidates. Single-valued
+        predicates in ``functional_predicates`` participate in recency
+        supersession and are not enumerated here.
 
         Returns:
             The exclusion and implication links, ordered deterministically.
@@ -493,7 +491,9 @@ def functional_exclusion_partner(
     functional = frozenset(functional_predicates)
     if not functional:
         return None
-    atom = parse_atom(atom_text(node_id, beliefs.get(node_id, {})))
+    if node_id not in beliefs:
+        return None
+    atom = parse_atom(atom_text(node_id, beliefs[node_id]))
     if atom is None:
         return None
     predicate, args = atom.predicate, atom.args

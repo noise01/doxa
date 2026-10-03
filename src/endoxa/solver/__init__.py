@@ -36,9 +36,10 @@ from endoxa.solver.api import (
     Solver,
 )
 from endoxa.solver.ast.context import global_ctx
-from endoxa.solver.ast.expr import App, Const, Expr, FuncDecl, Quantifier, Var
+from endoxa.solver.ast.expr import App, Const, Expr, FuncDecl, Pattern, Quantifier, Var
+from endoxa.solver.ast.expr import BoundVar as BoundVarExpr
 from endoxa.solver.ast.sorts import BOOL_SORT, INT_SORT, Sort, USort
-from endoxa.solver.parsers import parse_fof, to_tptp
+from endoxa.solver.parsers import parse_fof, to_tptp_expr
 
 __all__ = [
     "BOOL_SORT",
@@ -48,6 +49,7 @@ __all__ = [
     "Bool",
     "BoolVal",
     "BoundVar",
+    "BoundVarExpr",
     "Const",
     "Eq",
     "Exists",
@@ -60,6 +62,7 @@ __all__ = [
     "MultiPattern",
     "Not",
     "Or",
+    "Pattern",
     "Quantifier",
     "Solver",
     "Sort",
@@ -67,5 +70,5 @@ __all__ = [
     "Var",
     "global_ctx",
     "parse_fof",
-    "to_tptp",
+    "to_tptp_expr",
 ]

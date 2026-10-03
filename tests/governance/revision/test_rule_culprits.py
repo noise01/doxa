@@ -27,8 +27,18 @@ def _rule(tptp: str) -> Expr:
 def _clashing_residences() -> dict[str, dict[str, Any]]:
     """Build a contradiction no rule participates in: two residences for one person."""
     return {
-        "lives_in(alice, tokyo)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-        "lives_in(alice, osaka)": {"belief_context": "observation", "confidence": 0.9, "truth_value": True},
+        "lives_in(alice, tokyo)": {
+            "atom": "lives_in(alice, tokyo)",
+            "stance": "asserted",
+            "confidence": 1.0,
+            "truth_value": True,
+        },
+        "lives_in(alice, osaka)": {
+            "atom": "lives_in(alice, osaka)",
+            "stance": "asserted",
+            "confidence": 0.9,
+            "truth_value": True,
+        },
     }
 
 
@@ -54,8 +64,8 @@ class TestGenuineRuleCulprit:
 
     def test_rule_forcing_a_denied_consequent_is_a_culprit(self) -> None:
         beliefs = {
-            "bird(tweety)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-            "flies(tweety)": {"belief_context": "observation", "confidence": 0.9, "truth_value": False},
+            "bird(tweety)": {"atom": "bird(tweety)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
+            "flies(tweety)": {"atom": "flies(tweety)", "stance": "asserted", "confidence": 0.9, "truth_value": False},
         }
         guilty = _rule("fof(r, axiom, ![X] : (bird(X) => flies(X))).")
         assert find_rule_culprits(beliefs, [guilty], [guilty], _FUNCTIONAL) == [guilty]
@@ -68,8 +78,8 @@ class TestGenuineRuleCulprit:
         # being examined.
         beliefs = {
             **_clashing_residences(),
-            "bird(tweety)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-            "flies(tweety)": {"belief_context": "observation", "confidence": 0.9, "truth_value": False},
+            "bird(tweety)": {"atom": "bird(tweety)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
+            "flies(tweety)": {"atom": "flies(tweety)", "stance": "asserted", "confidence": 0.9, "truth_value": False},
         }
         guilty = _rule("fof(r, axiom, ![X] : (bird(X) => flies(X))).")
         assert find_rule_culprits(beliefs, [guilty], [guilty], _FUNCTIONAL) == []

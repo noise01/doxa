@@ -29,8 +29,8 @@ def _wrong_implication() -> PredicateConstraints:
 
 def _cat_but_not_fish() -> dict[str, dict[str, Any]]:
     return {
-        "cat(mike)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-        "fish(mike)": {"belief_context": "user", "confidence": 1.0, "truth_value": False},
+        "cat(mike)": {"atom": "cat(mike)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
+        "fish(mike)": {"atom": "fish(mike)", "stance": "asserted", "confidence": 1.0, "truth_value": False},
     }
 
 
@@ -41,8 +41,8 @@ class TestLinkIsTheCulprit:
 
     def test_wrong_exclusion_is_found(self) -> None:
         beliefs = {
-            "cat(mike)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-            "pet(mike)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
+            "cat(mike)": {"atom": "cat(mike)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
+            "pet(mike)": {"atom": "pet(mike)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
         }
         links = PredicateConstraints(exclusion_targets={"cat": {"pet"}})
         assert find_link_culprits(beliefs, [], links) == [
@@ -60,8 +60,8 @@ class TestLinkIsTheCulprit:
 class TestLinkIsInnocent:
     def test_rule_driven_contradiction_blames_no_link(self) -> None:
         beliefs = {
-            "bird(tweety)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-            "flies(tweety)": {"belief_context": "observation", "confidence": 0.9, "truth_value": False},
+            "bird(tweety)": {"atom": "bird(tweety)", "stance": "asserted", "confidence": 1.0, "truth_value": True},
+            "flies(tweety)": {"atom": "flies(tweety)", "stance": "asserted", "confidence": 0.9, "truth_value": False},
         }
         guilty_rule = _rule("fof(r, axiom, ![X] : (bird(X) => flies(X))).")
         links = PredicateConstraints(implication_targets={"cat": {"animal"}})
@@ -72,8 +72,18 @@ class TestLinkIsInnocent:
         # and its clashes are superseded by recency upstream, so it is
         # never offered up for retraction.
         beliefs = {
-            "lives_in(alice, tokyo)": {"belief_context": "user", "confidence": 1.0, "truth_value": True},
-            "lives_in(alice, osaka)": {"belief_context": "observation", "confidence": 0.9, "truth_value": True},
+            "lives_in(alice, tokyo)": {
+                "atom": "lives_in(alice, tokyo)",
+                "stance": "asserted",
+                "confidence": 1.0,
+                "truth_value": True,
+            },
+            "lives_in(alice, osaka)": {
+                "atom": "lives_in(alice, osaka)",
+                "stance": "asserted",
+                "confidence": 0.9,
+                "truth_value": True,
+            },
         }
         links = PredicateConstraints(functional_predicates=("lives_in",))
         assert find_link_culprits(beliefs, [], links) == []
@@ -99,7 +109,7 @@ class TestConstraintReduction:
             exclusion_targets={"alive": {"dead"}},
             implication_targets={"cat": {"animal"}},
         )
-        assert links.acquired_links() == [
+        assert links.revision_candidates() == [
             PredicateLink(kind="exclusion", predicate="alive", target="dead"),
             PredicateLink(kind="implication", predicate="cat", target="animal"),
         ]

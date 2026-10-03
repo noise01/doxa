@@ -1,13 +1,12 @@
 """Independent support is not self-support or entailment from contradiction."""
 
-import inspect
 from typing import get_type_hints
 
 import pytest
 
 from endoxa.errors import InvalidArgumentError, RuleSyntaxError, SortMismatchError
 from endoxa.governance import Belief, EntailmentResult, check_belief_support, check_entailment
-from endoxa.governance.revision import entails, parse_fact_to_expr
+from endoxa.governance.revision import check_atom_support, parse_fact_to_expr
 from endoxa.solver import (
     BOOL_SORT,
     INT_SORT,
@@ -27,7 +26,7 @@ from endoxa.solver import (
 
 
 def _belief(target, *, truth=True):
-    return Belief(target, truth, 0.7)
+    return Belief(truth_value=truth, confidence=0.7, id=target or "empty-atom", atom=target, stance="asserted")
 
 
 @pytest.mark.parametrize(
@@ -117,10 +116,10 @@ def test_ground_euf_and_quantified_rule_inputs():
 
 def test_support_excludes_self_but_can_find_an_independent_rule():
     target = _belief("mortal(socrates)")
-    assert check_belief_support([target], [], target.target).verdict == "NOT_ENTAILED"
+    assert check_belief_support([target], [], target.id).verdict == "NOT_ENTAILED"
     rule = parse_fof("fof(m, axiom, ![X]: (human(X) => mortal(X))).")[2]
     beliefs = [target, _belief("human(socrates)")]
-    assert check_belief_support(beliefs, [rule], target.target).verdict == "ENTAILED"
+    assert check_belief_support(beliefs, [rule], target.id).verdict == "ENTAILED"
     assert beliefs == [target, _belief("human(socrates)")]
 
 
@@ -140,19 +139,13 @@ def test_negative_support_is_explicit_and_not_chosen_by_stored_truth():
 def test_inconsistent_remaining_premises_do_not_support_the_target():
     beliefs = [_belief("q"), _belief("p"), _belief(" p ", truth=False)]
     assert check_belief_support(beliefs, [], "q") == EntailmentResult("UNSAT", None)
-    # The legacy API deliberately remains classical, including explosion.
-    assert entails({"p": {"truth_value": True}, " p ": {"truth_value": False}}, [], "q") == "ENTAILED"
+    data = {belief.id: belief.to_record() for belief in beliefs}
+    assert check_atom_support(data, [], "q") == EntailmentResult("UNSAT", None)
 
 
-def test_legacy_entails_signature_and_self_exclusion_remain():
-    assert list(inspect.signature(entails).parameters) == [
-        "beliefs",
-        "rule_exprs",
-        "target",
-        "max_rounds",
-        "max_matches",
-    ]
-    assert entails({"p": {"truth_value": True}}, [], "p") == "NOT_ENTAILED"
+def test_atom_support_for_an_unheld_target_and_no_self_proof():
+    assert check_atom_support({"id": {"atom": "p", "truth_value": True}}, [], "p").verdict == "NOT_ENTAILED"
+    assert check_atom_support({}, [], "q") == EntailmentResult("SAT", "SAT")
     assert check_entailment([parse_fact_to_expr("p")], parse_fact_to_expr("p")).verdict == "ENTAILED"
 
 
@@ -248,3 +241,38 @@ def test_support_forwards_both_limits(monkeypatch):
 def test_non_string_target_id_is_refused():
     with pytest.raises(InvalidArgumentError, match="target_id"):
         check_belief_support([_belief("p")], [], [])
+
+
+def test_atom_query_can_name_an_unheld_atom_and_excludes_all_polarities():
+    data = {
+        "observation:1": {"atom": "p( a )", "truth_value": True},
+        "observation:2": {"atom": " p(a) ", "truth_value": False},
+        "observation:3": {"atom": "q(a)", "truth_value": True},
+    }
+    assert check_atom_support(data, [], "p(a)").verdict == "NOT_ENTAILED"
+    rule = parse_fof("fof(r, axiom, ![X]: (q(X) => p(X))).")[2]
+    assert check_atom_support(data, [rule], "p(a)").verdict == "ENTAILED"
+    # The query accepts atom text rather than resolving a held target ID.
+    assert check_atom_support({}, [], "unheld(a)").verdict == "NOT_ENTAILED"
+    with pytest.raises(InvalidArgumentError, match="not found"):
+        check_belief_support([], [], "unheld:id")
+
+
+@pytest.mark.parametrize("status", ["UNSAT", "UNKNOWN"])
+def test_atom_query_stops_at_non_sat_premises_and_forwards_both_limits(monkeypatch, status):
+    calls = []
+
+    def check(_solver, *assumptions: object, **limits: object):
+        calls.append((assumptions, limits))
+        return status
+
+    monkeypatch.setattr(Solver, "check", check)
+    result = check_atom_support({}, [], "unheld", max_rounds=3, max_matches=5)
+    assert result == EntailmentResult(status, None)
+    assert calls == [((), {"max_rounds": 3, "max_matches": 5})]
+
+
+@pytest.mark.parametrize("truth", [None, 1, "false"])
+def test_atom_query_refuses_non_boolean_observations(truth):
+    with pytest.raises(InvalidArgumentError):
+        check_atom_support({"observation": {"atom": "p", "truth_value": truth}}, [], "q")

@@ -34,20 +34,17 @@ Depends only on the bundled solver (:mod:`endoxa.solver`) and on this package's 
 revision logic (:mod:`endoxa.governance.revision`).
 """
 
-from collections.abc import Collection, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from collections.abc import Collection, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
 from endoxa.errors import InvalidArgumentError
 from endoxa.governance.formulas import parse_premise_fof
 from endoxa.governance.ledger import LedgerOp
 from endoxa.governance.metadata import (
-    Stance,
-    canonical_atom,
+    Belief,
     validate_confidence,
     validate_id,
-    validate_source,
-    validate_stance,
 )
 from endoxa.governance.revision import (
     ContradictionTie,
@@ -59,7 +56,7 @@ from endoxa.governance.revision import (
     select_verified_revision_target,
 )
 from endoxa.governance.revision.facts import parse_fact_to_expr
-from endoxa.solver import Expr, parse_fof
+from endoxa.solver import Expr
 
 #: ``actor`` stamped on the operations governance itself decides. A host that
 #: applies one writes it under whatever role its own beliefs use; what the ledger
@@ -71,97 +68,6 @@ GOVERNANCE_ACTOR = "governance"
 #: be re-learned -- which is the ledger's own stance: the entry does not
 #: disappear, it stops counting.
 RETRACTED_RULE_CONFIDENCE = 0.0
-
-
-@dataclass(frozen=True, slots=True)
-class Belief:
-    """One belief handed to governance.
-
-    Attributes:
-        target: The belief ID. Legacy inputs use their expression string as ID.
-        truth_value: What it claims.
-        confidence: Its credence. Under the existing policy an asserted belief
-            at 1.0 is protected, while a hypothesis remains revisable even at 1.0.
-        context: The role it was born under. The revision preference reads this to
-            tell a conjecture from an assertion (``hypothesis``), and
-            getting it wrong silently disables that preference. Retained as a
-            fallback only when stance is absent; it never supplies source.
-        atom: Explicit flat ground atom, normalized independently of target.
-        stance: asserted or hypothesis, independent of source and confidence.
-            A nonempty context that implies the opposite stance is refused.
-        source: Optional origin kind from SOURCE_KINDS, never a revision priority.
-    """
-
-    target: str
-    truth_value: bool
-    confidence: float
-    context: str = ""
-    atom: str | None = field(default=None, kw_only=True)
-    stance: Stance | None = field(default=None, kw_only=True)
-    source: str | None = field(default=None, kw_only=True)
-
-    def __post_init__(self) -> None:
-        validate_stance(self.stance)
-        validate_source(self.source)
-        if self.atom is not None:
-            validate_confidence(self.confidence)
-            if not isinstance(self.truth_value, bool):
-                msg = "Explicit belief truth_value must be a bool"
-                raise InvalidArgumentError(msg)
-            validate_id(self.target)
-            object.__setattr__(self, "atom", canonical_atom(self.atom))
-        if self.stance is not None and self.context:
-            legacy = "hypothesis" if self.context == "hypothesis" else "asserted"
-            if self.stance != legacy:
-                msg = "Explicit stance conflicts with legacy context"
-                raise InvalidArgumentError(msg)
-
-    @property
-    def id(self) -> str:
-        """Stable identity used by operations and support references."""
-        return self.target
-
-    @classmethod
-    def from_atom(  # noqa: PLR0913 - explicit identity, claim and metadata
-        cls,
-        *,
-        id: str,  # noqa: A002 - the public identity name
-        atom: str,
-        truth_value: bool,
-        confidence: float,
-        stance: Stance = "asserted",
-        source: str | None = None,
-    ) -> Belief:
-        """Build a belief with a separate ID and normalized flat ground atom.
-
-        No role or source determines stance or confidence. An ID must remain
-        attached to the same atom throughout its recorded lifetime.
-        """
-        validate_id(id)
-        if not isinstance(truth_value, bool):
-            msg = "truth_value must be a bool"
-            raise InvalidArgumentError(msg)
-        if stance is None:
-            msg = "from_atom requires an explicit stance"
-            raise InvalidArgumentError(msg)
-        return cls(id, truth_value, confidence, atom=canonical_atom(atom), stance=stance, source=source)
-
-    def to_record(self) -> dict[str, Any]:
-        """Return plain fields for a host to persist, including explicit omissions."""
-        return asdict(self)
-
-    @classmethod
-    def from_record(cls, record: Mapping[str, Any]) -> Belief:
-        """Restore a field record without inferring source or stance from actor.
-
-        Legacy records may omit atom, stance and source. This is a field codec,
-        not an adapter for a host database or an implementation of storage.
-        """
-        try:
-            return cls(**dict(record))
-        except TypeError as error:
-            msg = "Invalid belief field record"
-            raise InvalidArgumentError(msg) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +87,14 @@ class Rule:
     axiom: str
     confidence: float
     defeasible: bool = True
+
+    def __post_init__(self) -> None:
+        validate_id(self.name)
+        validate_confidence(self.confidence)
+        if not isinstance(self.defeasible, bool):
+            msg = "defeasible must be a bool"
+            raise InvalidArgumentError(msg)
+        parse_premise_fof(self.axiom)
 
     @classmethod
     def from_fof(cls, text: str, *, confidence: float, defeasible: bool, name: str | None = None) -> Rule:
@@ -297,7 +211,7 @@ def govern(
     if len(set(rule_ids)) != len(rule_ids) or set(rule_ids) & held.keys():
         msg = "Rule IDs must be unique and distinct from belief IDs"
         raise InvalidArgumentError(msg)
-    if escalated is not None and any(belief.atom is not None for belief in beliefs) and escalated not in held:
+    if escalated is not None and escalated not in held:
         msg = f"Escalated belief ID not found: {escalated!r}"
         raise InvalidArgumentError(msg)
     theory = _theory(constraints)
@@ -472,9 +386,7 @@ def _supersede(
 def _belief_map(beliefs: Sequence[Belief]) -> dict[str, dict[str, Any]]:
     """Build the node-id -> data mapping the governance logic reads.
 
-    The role goes under ``belief_context`` because that is the key the host's
-    belief store writes and the revision preference reads; putting it under
-    ``role`` would silently disable the hypothesis preference.
+    Atom and stance are explicit fields; writer roles are not interpreted.
     """
     held: dict[str, dict[str, Any]] = {}
     owners: dict[str, str] = {}
@@ -483,7 +395,7 @@ def _belief_map(beliefs: Sequence[Belief]) -> dict[str, dict[str, Any]]:
         if belief.id in held:
             msg = f"Duplicate belief ID: {belief.id!r}"
             raise InvalidArgumentError(msg)
-        expression = belief.target if belief.atom is None else belief.atom
+        expression = belief.atom
         key = str(parse_fact_to_expr(expression))
         if key in owners:
             msg = f"Atom {expression!r} has multiple belief IDs"
@@ -492,13 +404,11 @@ def _belief_map(beliefs: Sequence[Belief]) -> dict[str, dict[str, Any]]:
         data: dict[str, Any] = {
             "truth_value": belief.truth_value,
             "confidence": belief.confidence,
-            "belief_context": belief.context,
             "stance": belief.stance,
             "source": belief.source,
             "node_type": "atom",
         }
-        if belief.atom is not None:
-            data["atom"] = belief.atom
+        data["atom"] = belief.atom
         held[belief.id] = data
     return held
 
@@ -510,8 +420,8 @@ def _theory(constraints: Constraints) -> _Theory:
     hand, kept because the solver's UNSAT core is a set of these exprs and the
     order it reports them in is what the downstream selectors iterate.
     """
-    rule_exprs = [(rule, parse_fof(rule.axiom)[2]) for rule in constraints.rules]
-    hard_exprs = [parse_fof(axiom)[2] for axiom in constraints.hard_axioms]
+    rule_exprs = [(rule, parse_premise_fof(rule.axiom)[2]) for rule in constraints.rules]
+    hard_exprs = [parse_premise_fof(axiom)[2] for axiom in constraints.hard_axioms]
     return _Theory(
         active=[expr for _rule, expr in rule_exprs] + hard_exprs,
         defeasible=[(rule, expr) for rule, expr in rule_exprs if rule.defeasible],

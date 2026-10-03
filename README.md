@@ -4,9 +4,8 @@
 defeasible revision, and calibration instruments — a layer you give an agent,
 not a framework you build one inside.
 
-> **Status: pre-alpha.** The library was extracted whole from the research system
-> it grew in, where it has run for months. Versions before 1.0 may move the public
-> API: what is shown below is where the extraction landed, not a promise.
+> **Status: pre-alpha.** Versions before 1.0 may move the public API.
+> Review the changelog when upgrading.
 
 ## The problem
 
@@ -49,8 +48,8 @@ constraints = Constraints(
     ),
 )
 beliefs = [
-    Belief(target="human(socrates)", truth_value=True, confidence=1.0, context="user"),
-    Belief(target="mortal(socrates)", truth_value=False, confidence=0.6, context="agent"),
+    Belief(truth_value=True, confidence=1.0, id="human(socrates)", atom="human(socrates)", stance="asserted"),
+    Belief(truth_value=False, confidence=0.6, id="mortal(socrates)", atom="mortal(socrates)", stance="asserted"),
 ]
 
 outcome = govern(beliefs, constraints)
@@ -77,9 +76,66 @@ is renewed for the next check. `None` leaves that dimension unbounded. These are
 neither a cumulative governance budget nor a wall-clock deadline; a round limit
 alone does not bound matching work inside a round.
 
-Three runnable scripts go further — what happens over a run of turns, what a
-conflict that cannot be settled looks like, and what the instruments report. See
-[examples/](examples/).
+Runnable scripts cover revision, unresolved ties, instruments, a direct ledger
+and solver expressions. See [examples/](examples/).
+
+## A ledger without events
+
+`LedgerOp` is the core data contract. You own the sequence and its persistence;
+`reconstruct_view` folds operations in their supplied order, without sorting
+timestamps. Append the operations returned by `govern` to that same sequence.
+
+```python
+from endoxa.governance import LedgerOp, reconstruct_view
+
+ledger = [
+    LedgerOp(
+        "assert",
+        "reading:1",
+        truth_value=True,
+        confidence=0.7,
+        atom="door_closed(room)",
+        stance="hypothesis",
+        source="tool",
+    ),
+    LedgerOp("confirm", "reading:1", actor="observer"),
+]
+state = reconstruct_view(ledger)["reading:1"]
+assert state.to_belief().atom == "door_closed(room)"
+assert state.source == "tool"
+assert len(ledger) == 2
+```
+
+`derive_ledger` is an optional adapter for the existing audit-row dialect defined
+in `endoxa.governance.derive`. Its input has `id`, `timestamp`, `event_type` and
+`payload` fields and uses the supported event-name constants. It retains its
+conversion rules and diagnostic counts. A new integration can write `LedgerOp`
+directly; it does not need to reproduce that event vocabulary.
+
+## Public expression and link interfaces
+
+Import solver constructors and AST types from `endoxa.solver`. `BoundVar` is a
+factory; `BoundVarExpr` is its AST class for annotations and `isinstance` checks.
+`MultiPattern` is a factory and `Pattern` its AST class. The other public AST
+types are `Expr`, `Var`, `Const`, `FuncDecl`, `App` and `Quantifier`.
+
+```python
+from endoxa.solver import BoundVar, BoundVarExpr, Function, MultiPattern, Pattern, USort, to_tptp_expr
+
+item = USort("item")
+x = BoundVar("X", item)
+assert isinstance(x, BoundVarExpr)
+f = Function("label", item, item)
+assert isinstance(MultiPattern(f(x)), Pattern)
+assert to_tptp_expr(f(x)) == "label(X)"
+```
+
+`to_tptp_expr` serializes an expression body, including terms. It does not add a
+`fof(name, role, body).` wrapper or choose a FOF role. Serialization behavior is unchanged.
+
+`PredicateConstraints.revision_candidates()` enumerates exclusion and implication
+links in deterministic order for possible retraction. Single-valued predicates are excluded from that list
+and continue to participate in recency supersession.
 
 ## Entailment and independent support
 
@@ -89,7 +145,7 @@ from endoxa.solver import Bool
 
 p = Bool("p")
 check_entailment([p], p).verdict  # "ENTAILED": premises retain the conclusion
-beliefs = [Belief("human(socrates)", True, 0.7)]
+beliefs = [Belief(truth_value=True, confidence=0.7, id="human(socrates)", atom="human(socrates)", stance="asserted")]
 check_belief_support(beliefs, [], "human(socrates)").verdict  # "NOT_ENTAILED"
 ```
 
@@ -110,32 +166,33 @@ variables and bare patterns are refused.
 target ID. It removes all beliefs with the same atom in either polarity,
 including whitespace variants with different IDs. `truth_value=False` queries
 the negated atom; the default queries its positive form regardless of its stored
-truth value. An explicit `atom` allows an arbitrary `target` ID; without it,
-the target retains its legacy meaning as flat ground atom text. Predicates and
+truth value. An explicit atom has an independent ID;
+belief atoms are explicit flat ground atom text. Predicates and
 constant arguments start with a lower-case letter. Nested terms and formula
 beliefs are not supported. Missing or duplicate IDs
 are `InvalidArgumentError`; malformed atoms are `RuleSyntaxError`. Invalid
 inputs are errors, not UNKNOWN, and no belief is silently omitted.
 
-The legacy `endoxa.governance.revision.entails` is unchanged: it excludes the
-target, returns three strings, and does not check premise consistency first.
-The new functions are additive, not aliases that change that behavior. They do
-not revise beliefs, ground a conclusion, or change FOF role interpretation.
+`endoxa.governance.revision.check_atom_support` checks the positive atom's
+independent support from explicit revision maps, including when it is not held.
+It returns the same four-verdict `EntailmentResult`; inconsistent premises do not
+support a conclusion. This query accepts atom text directly, so the atom need
+not already be held. It always queries the positive form and excludes every
+observation of that atom in either polarity. In contrast, `check_belief_support`
+resolves a held ID and accepts an explicit query polarity. Each map entry needs
+a nonempty string ID and a separate `atom` field; supplied `truth_value` must be
+Boolean and omission means true. Both queries stop after UNSAT or UNKNOWN
+premises, without querying a conclusion.
 
 ## Explicit identity and recorded metadata
 
 ```python
 from endoxa.governance import Belief, LedgerOp, reconstruct_view
 
-belief = Belief.from_atom(
-    id="belief:17",
-    atom="human( socrates )",
-    truth_value=True,
-    confidence=0.7,
-    stance="hypothesis",
-    source="tool",
+belief = Belief(
+    id="belief:17", atom="human( socrates )", truth_value=True, confidence=0.7, stance="hypothesis", source="tool"
 )
-assert belief.id == belief.target == "belief:17"
+assert belief.id == "belief:17"
 assert belief.atom == "human(socrates)"
 assert Belief.from_record(belief.to_record()) == belief
 
@@ -153,43 +210,26 @@ restored = reconstruct_view([birth])[belief.id].to_belief()
 assert restored == belief
 ```
 
-The original four positional `Belief` arguments remain valid. `atom`, `stance`
-and `source` are keyword-only; `id` is a read-only alias of `target`. The new
-factory normalizes flat ground atom whitespace but never normalizes IDs.
-Explicit confidence must be finite and between 0 and 1, and truth values must
-be Boolean. The legacy constructor's existing numeric behavior is unchanged.
+`Belief` requires keyword-only `id`, `atom`, `truth_value`, `confidence` and
+`stance`. `source` is optional. Atom whitespace is normalized; IDs stay opaque.
+Confidence must be finite and between 0 and 1, and truth values must be Boolean.
+Record codecs require these explicit fields and do not infer missing metadata.
 
 `govern` refuses duplicate IDs, belief/rule ID collisions and multiple IDs for
 one atom, in either polarity. This replaces ambiguous core attribution with an
 error. Revision, link checks, supersession (`escalated`), holds and operations
 use IDs for references and atoms for formulas. Low-level cores remain Exprs,
-paired with an expression-to-ID map. Legacy low-level dictionaries still use
-their keys as formulas; explicit dictionaries carry `atom` in each row.
+paired with an expression-to-ID map. Low-level revision dictionaries require
+`atom` in each row and explicit `stance` where revision preference is used.
 Support queries allow multiple IDs for an atom and exclude every one.
 
-`stance` is `asserted` or `hypothesis`. When absent, the old context comparison
-remains the fallback. Explicit stance conflicting with a nonempty context is
-refused. `source` is an optional member of `SOURCE_KINDS`; it supplies neither
-stance nor confidence. Existing policy remains: confidence 1.0 protects an
-assertion, while a hypothesis is still revisable at 1.0.
+`stance` is `asserted` or `hypothesis`, chosen by the caller independently of
+writer attribution and source. Source kinds are `user`, `tool`, `corpus` and
+`derivation`; omission means unknown, not an inferred origin. Ledger replay keeps
+old records readable with missing metadata. `BeliefState.to_belief()` requires
+recorded atom, stance and confidence before producing a governable belief.
 
-Record atom and stance on the initial ledger assertion, with source when known,
-before appending ID-only operations. Replay refuses another atom, origin kind
-or target kind for the same explicit belief ID; polarity and explicit stance
-may change. An omitted field leaves recorded metadata untouched. Actor remains
-the writer, not the origin or standing. Old ledgers keep their original
-actor/context replay and leave new metadata as None. The strict `to_belief`
-conversion requires recorded atom, stance and confidence; it never guesses
-missing metadata or reconstructs a belief from a partial operation series.
-
-`to_record` and `from_record` are plain field codecs for a host to persist and
-restore. They do not provide storage, migrate a database or change retrieval
-policy. Preserve ID, atom and recorded stance/source across paging. Historical
-atoms may use different IDs; governance requires unique atom ownership in the
-current snapshot. Comparing truth/confidence with `compare_to_state` remains
-its existing contract, not a metadata-equivalence certificate.
-
-## Strict additive FOF entry points
+## Strict FOF entry points
 
 ```python
 from endoxa.governance import Rule, parse_premise_fof, parse_query_fof
@@ -211,38 +251,20 @@ and unsupported syntax are refused. Both parsers retain name, role and Expr,
 with the same Boolean/uninterpreted fragment as `check_entailment`. The rule's
 operation ID defaults to the FOF name; an override leaves the original
 annotated text intact. Roles never supply source, stance or defeasibility.
-The old `parse_fof`, `Rule` constructor and `revision.entails` keep their existing
-role acceptance and semantics.
+The `Rule` constructor and governance's hard axioms use the same strict premise
+validation. `Rule.from_fof` additionally reads a default ID from the FOF name.
+The general `parse_fof` parser can read other roles; it does not designate a
+formula as a valid governance premise.
 
-## Compatibility during migration
+## Upgrading from 0.5.0
 
-The additive entry points do not silently redirect the old ones:
+Version 0.6.0 uses explicit belief fields and revision-map atoms. Migrate
+callers before using it: `target` and `context`, `Belief.from_atom`, `entails`,
+`acquired_links` and `to_tptp` are removed. Use `Belief`, consistency-guarded
+support queries, `revision_candidates` and `to_tptp_expr` respectively.
 
-| Existing entry point | Additive entry point | Choice the consumer makes |
-| --- | --- | --- |
-| Positional `Belief(target, truth_value, confidence, context)` | `Belief.from_atom`, keyword-only atom/stance/source | Record separate identity and formula explicitly. |
-| `Rule` constructor and `parse_fof` | `Rule.from_fof`, `parse_premise_fof`, `parse_query_fof` | Adopt closed-formula and role validation. |
-| `revision.entails` | `check_entailment`, `check_belief_support` | Adopt premise consistency checking and four distinct verdicts. |
-| `reconstruct_view` of old ledger entries | `BeliefState.to_belief` of fully recorded entries | Keep ordinary replay; opt into strict explicit-belief conversion separately. |
-
-Old `entails` remains a self-excluding refutation query with a permissive fact
-parser. Inconsistent remaining premises can still yield ENTAILED there. A
-consumer must explicitly adopt the guarded query to change that behavior.
-UNKNOWN never supplies a consistency or support certificate. Solver round and
-match limits apply per check, including revision rechecks; consumers still have
-to pass their budgets at every call boundary.
-
-Compatibility paths are retained for consumers still using them. Removal needs
-an inventory with no remaining old consumers, validated replacements for their
-behavior and stored records, and an explicit compatibility decision. No removal
-date or version is promised. The ordinary legacy ledger fold remains supported;
-strict conversion is an additional opt-in operation, not a prerequisite for it.
-
-The [consumer contract tests](tests/test_consumer_contract.py) exercise the old
-constructor positions and refutation behavior, and run a minimal independent
-consumer in a fresh interpreter with an import fence. They complement the
-query, revision-budget and ledger tests; they do not certify a particular
-consumer's database migration or an installed release.
+Historic ledger rows still replay without inventing atom, stance or source.
+This data-reading contract is separate from constructing new API records.
 
 ## Install
 

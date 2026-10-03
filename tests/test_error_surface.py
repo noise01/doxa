@@ -79,7 +79,15 @@ class TestTheParserDoesNotReachThrough:
         """``govern`` parses the rules it is handed, so the boundary has to hold there."""
         with pytest.raises(EndoxaError):
             govern(
-                beliefs=[Belief(target="human(socrates)", truth_value=True, confidence=1.0)],
+                beliefs=[
+                    Belief(
+                        truth_value=True,
+                        confidence=1.0,
+                        id="human(socrates)",
+                        atom="human(socrates)",
+                        stance="asserted",
+                    )
+                ],
                 constraints=Constraints(rules=(Rule(name="r", axiom="not a formula", confidence=0.9),)),
             )
 
