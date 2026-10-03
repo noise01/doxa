@@ -31,7 +31,8 @@ instead. The distinction is narrow and it matters: every tier must read the same
 *link set*, not synthesise the same *clauses* from it.
 
 Pure: stdlib, the sibling :mod:`.facts`, :mod:`endoxa.solver`, and the atom grammar
-in :mod:`endoxa.syntax`. Clauses are built from the belief *node-id strings* via
+in :mod:`endoxa.syntax`. Clauses are built from explicit belief atoms, with
+legacy node IDs as the fallback, via
 :func:`parse_fact_to_expr`, the same parser :func:`.engine.build_assumptions`
 uses, so a synthesised clause's atom expressions are identical to the assumption
 expressions and the solver correlates them.
@@ -42,6 +43,7 @@ from dataclasses import dataclass, field, replace
 from itertools import combinations
 from typing import Any, Literal
 
+from endoxa.governance.metadata import atom_text, validate_atom_ids
 from endoxa.governance.revision.facts import parse_fact_to_expr
 from endoxa.solver import And, Expr, Implies, Not
 from endoxa.syntax import parse_atom
@@ -193,6 +195,7 @@ def functional_exclusion_clauses(
     Returns:
         The ground exclusion clause expressions to add as hard constraints.
     """
+    validate_atom_ids(beliefs)
     functional = frozenset(functional_predicates)
     if not functional:
         return []
@@ -202,7 +205,7 @@ def functional_exclusion_clauses(
     for node_id, data in beliefs.items():
         if not _is_true(data):
             continue
-        atom = parse_atom(node_id)
+        atom = parse_atom(atom_text(node_id, data))
         if atom is None:
             continue
         predicate, args = atom.predicate, atom.args
@@ -214,7 +217,14 @@ def functional_exclusion_clauses(
     for members in groups.values():
         for (id_a, value_a), (id_b, value_b) in combinations(members, 2):
             if value_a != value_b:
-                clauses.append(Not(And(parse_fact_to_expr(id_a), parse_fact_to_expr(id_b))))
+                clauses.append(
+                    Not(
+                        And(
+                            parse_fact_to_expr(atom_text(id_a, beliefs[id_a])),
+                            parse_fact_to_expr(atom_text(id_b, beliefs[id_b])),
+                        )
+                    )
+                )
     return clauses
 
 
@@ -254,6 +264,7 @@ def inter_predicate_exclusion_clauses(
     Returns:
         The ground exclusion clause expressions to add as hard constraints.
     """
+    validate_atom_ids(beliefs)
     if not exclusion_targets:
         return []
 
@@ -264,7 +275,7 @@ def inter_predicate_exclusion_clauses(
     for node_id, data in beliefs.items():
         if not _is_true(data):
             continue
-        atom = parse_atom(node_id)
+        atom = parse_atom(atom_text(node_id, data))
         if atom is None:
             continue
         predicate, args = atom.predicate, atom.args
@@ -276,7 +287,14 @@ def inter_predicate_exclusion_clauses(
             if pred_a == pred_b:
                 continue
             if pred_b in exclusion_targets.get(pred_a, ()) or pred_a in exclusion_targets.get(pred_b, ()):
-                clauses.append(Not(And(parse_fact_to_expr(id_a), parse_fact_to_expr(id_b))))
+                clauses.append(
+                    Not(
+                        And(
+                            parse_fact_to_expr(atom_text(id_a, beliefs[id_a])),
+                            parse_fact_to_expr(atom_text(id_b, beliefs[id_b])),
+                        )
+                    )
+                )
     return clauses
 
 
@@ -322,6 +340,7 @@ def implication_clauses(
     Returns:
         The ground implication clause expressions to add as hard constraints.
     """
+    validate_atom_ids(beliefs)
     if not implication_targets:
         return []
 
@@ -331,7 +350,7 @@ def implication_clauses(
     true_by_args: dict[tuple[str, ...], list[tuple[str, str]]] = {}
     false_by_args: dict[tuple[str, ...], dict[str, str]] = {}
     for node_id, data in beliefs.items():
-        atom = parse_atom(node_id)
+        atom = parse_atom(atom_text(node_id, data))
         if atom is None:
             continue
         predicate, args = atom.predicate, atom.args
@@ -349,7 +368,12 @@ def implication_clauses(
             for target in implication_targets.get(predicate, ()):
                 consequent_id = negated.get(target)
                 if consequent_id is not None:
-                    clauses.append(Implies(parse_fact_to_expr(node_id), parse_fact_to_expr(consequent_id)))
+                    clauses.append(
+                        Implies(
+                            parse_fact_to_expr(atom_text(node_id, beliefs[node_id])),
+                            parse_fact_to_expr(atom_text(consequent_id, beliefs[consequent_id])),
+                        )
+                    )
     return clauses
 
 
@@ -465,10 +489,11 @@ def functional_exclusion_partner(
     "the subject moved", and below :data:`FUNCTIONAL_MIN_ARITY` there is no
     subject to have moved --- the partner would be a claim about someone else.
     """
+    validate_atom_ids(beliefs)
     functional = frozenset(functional_predicates)
     if not functional:
         return None
-    atom = parse_atom(node_id)
+    atom = parse_atom(atom_text(node_id, beliefs.get(node_id, {})))
     if atom is None:
         return None
     predicate, args = atom.predicate, atom.args
@@ -478,7 +503,7 @@ def functional_exclusion_partner(
     for other_id, data in beliefs.items():
         if other_id == node_id or not _is_true(data):
             continue
-        other = parse_atom(other_id)
+        other = parse_atom(atom_text(other_id, data))
         if other is None:
             continue
         other_pred, other_args = other.predicate, other.args

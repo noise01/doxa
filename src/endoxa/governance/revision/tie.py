@@ -25,6 +25,7 @@ Pure: stdlib and this package's own revision logic only.
 from dataclasses import dataclass
 from typing import Any
 
+from endoxa.governance.metadata import atom_text
 from endoxa.governance.revision.engine import _fact_argument_terms, check_consistency
 from endoxa.governance.revision.links import PredicateConstraints, predicate_clauses
 from endoxa.governance.revision.preference import is_unsettleable_pair
@@ -49,12 +50,13 @@ class ContradictionTie:
     (and hence its de-duplication key) wobble from beat to beat.
 
     Attributes:
-        node_a: The atom the question asks about, in the positive.
+        node_a: ID of the belief asked about, in the positive. Resolve its
+            atom from the input snapshot when presenting the question.
         truth_a: The truth value ``node_a`` is currently held at.
         node_b: The other atom in the conflict.
         truth_b: The truth value ``node_b`` is currently held at.
-        affirm_true: Atoms to ground **True** if the user affirms (False if denies).
-        affirm_false: Atoms to ground **False** if the user affirms (True if denies).
+        affirm_true: Belief IDs to ground **True** on affirmation (False on denial).
+        affirm_false: Belief IDs to ground **False** on affirmation (True on denial).
     """
 
     node_a: str
@@ -115,6 +117,7 @@ def select_tie_question_target(  # noqa: PLR0913
     rule_exprs: list[Expr],
     *,
     max_rounds: int | None = None,
+    max_matches: int | None = None,
     links: PredicateConstraints | None = None,
 ) -> ContradictionTie | None:
     """Decide whether a contradiction is a tie worth asking the user about.
@@ -158,6 +161,8 @@ def select_tie_question_target(  # noqa: PLR0913
         rule_exprs: The active rule expressions (hard constraints for the re-check).
         max_rounds: Optional E-matching round cap; an ``"UNKNOWN"`` re-check is
             treated conservatively as not settling the tie, so no question is asked.
+        max_matches: Optional candidate-binding cap per solver check, across its rounds.
+            Both limits are renewed for each completion, not shared across the search.
         links: The link sources whose ground clauses constrain the re-check.
 
     Returns:
@@ -180,9 +185,11 @@ def select_tie_question_target(  # noqa: PLR0913
     # other (has the four-row check).
     b_on_affirm = truth_a != truth_b
 
-    core_terms: frozenset[str] = frozenset().union(*(_fact_argument_terms(nid) for nid, _ in tie_nodes))
+    core_terms: frozenset[str] = frozenset().union(
+        *(_fact_argument_terms(atom_text(nid, data)) for nid, data in tie_nodes)
+    )
     cluster: dict[str, dict[str, Any]] = {
-        nid: data for nid, data in beliefs.items() if core_terms & _fact_argument_terms(nid)
+        nid: data for nid, data in beliefs.items() if core_terms & _fact_argument_terms(atom_text(nid, data))
     }
     for nid, data in tie_nodes:
         cluster.setdefault(nid, data)
@@ -190,7 +197,9 @@ def select_tie_question_target(  # noqa: PLR0913
     for targets in ((True, b_on_affirm), (False, not b_on_affirm)):
         completion = _completion(cluster, (node_a, node_b), targets)
         clauses = predicate_clauses(completion, links)
-        result, _, _ = check_consistency(completion, [*rule_exprs, *clauses], max_rounds=max_rounds)
+        result, _, _ = check_consistency(
+            completion, [*rule_exprs, *clauses], max_rounds=max_rounds, max_matches=max_matches
+        )
         if result != "SAT":
             return None
 

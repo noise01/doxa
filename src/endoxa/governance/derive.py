@@ -323,6 +323,11 @@ def _atom_operations(record: _Record, state: _FoldState) -> list[LedgerOp]:
     stated_truth = properties.get("truth_value")
     stated_truth = None if stated_truth is None else bool(stated_truth)
     confidence = _as_confidence(properties.get("confidence"))
+    metadata = (
+        {key: properties.get(key) for key in ("atom", "stance", "source")}
+        if properties.get("atom") is not None or properties.get("stance") is not None
+        else {}
+    )
     known = state.truth.get(node_id)
     if SUPPORTED_BY_KEY in properties:
         state.supports[node_id] = _support_refs(properties.get(SUPPORTED_BY_KEY))
@@ -350,6 +355,9 @@ def _atom_operations(record: _Record, state: _FoldState) -> list[LedgerOp]:
             origin_event_id=record.event_id,
             at=record.at,
             supported_by=state.supports.get(node_id, ()),
+            atom=metadata.get("atom"),
+            stance=metadata.get("stance"),
+            source=metadata.get("source"),
         ),
     ]
 

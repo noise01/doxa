@@ -19,6 +19,8 @@ Pure and basis-independent (governance tier): stdlib only.
 from collections.abc import Iterator
 from typing import Any
 
+from endoxa.governance.metadata import validate_stance
+
 # An atom's role is read from ``belief_context``, not from ``role``. A write takes
 # a role argument and stores it under that key; the stored belief has no ``role``
 # field at all. Reading ``role`` here matched nothing, which left the policy of
@@ -54,6 +56,10 @@ def is_hypothesis(data: dict[str, Any]) -> bool:
     distinction permanent means giving a belief a birth record that a later write
     cannot overwrite, which is more than this predicate can do on its own.
     """
+    stance = data.get("stance")
+    if stance is not None:
+        validate_stance(stance)
+        return bool(stance == _HYPOTHESIS)
     return data.get(_ROLE_KEY) == _HYPOTHESIS
 
 

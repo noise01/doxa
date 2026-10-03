@@ -40,11 +40,14 @@ reserving its dimensions turn out to be different acts. Separately, a column was
 added that nobody had reserved at all, and it cost nothing, which is the point:
 the promise is about adding rather than about a fixed list of seats.
 
-Pure and dependency-free: stdlib only.
+Pure: its own field schemas and metadata, with no storage or I/O.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
+
+from endoxa.errors import InvalidArgumentError
+from endoxa.governance.metadata import Stance, canonical_atom, validate_id, validate_source, validate_stance
 
 #: The seven ledger operations. The tuple fixes a stable reading order for
 #: reports; membership tests should use it rather than re-listing the names.
@@ -135,8 +138,8 @@ class LedgerOp:
 
     Attributes:
         op: Which of the seven operations this is.
-        target: What it is about -- a belief's node id (its expression string)
-            for ``atom``, the memory id for ``rule``.
+        target: What it is about -- a belief ID for atom, a rule ID for rule.
+            Legacy atom IDs are expression strings; explicit IDs stay opaque.
         target_kind: Which kind of thing ``target`` names.
         actor: The role that performed the write, verbatim from the host
             (``user``/``agent``/``observation``/``hypothesis``/``axiom`` ...).
@@ -192,6 +195,14 @@ class LedgerOp:
             seat was ``tuple[str, ...]`` and what has to sit in it is a set of
             *typed* endpoints (see :class:`SupportRef`), so reserving a seat and
             reserving its dimensions turned out to be different acts.
+        atom: Optional explicit ground atom. Record on the initial assertion
+            with stance, before appending ID-only governance operations. It is
+            stable for that ID; another formula requires another ID.
+        stance: Optional explicit standing, independent of actor and source.
+            A later explicit write may change it. Omission leaves it untouched.
+        source: Optional recorded origin kind, independent of the actor. Once
+            recorded, replay refuses a different kind for the same ID. This is
+            not a source-ID vocabulary or a storage policy implementation.
         valid_at: **Reserved** -- the temporality seat. A later form may carry
             time as syntax; until then a ledger entry knows when it was *written*
             (``at``), not when its claim holds.
@@ -213,6 +224,24 @@ class LedgerOp:
     session_id: str | None = None
     supported_by: tuple[SupportRef, ...] = ()
     valid_at: float | None = None
+    atom: str | None = field(default=None, kw_only=True)
+    stance: Stance | None = field(default=None, kw_only=True)
+    source: str | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        validate_stance(self.stance)
+        validate_source(self.source)
+        explicit = self.atom is not None or self.stance is not None or self.source is not None
+        if explicit:
+            validate_id(self.target)
+            if self.target_kind != "atom":
+                msg = "Belief metadata is only valid for atom operations"
+                raise InvalidArgumentError(msg)
+        if self.atom is not None:
+            object.__setattr__(self, "atom", canonical_atom(self.atom))
+            if self.stance is None:
+                msg = "An explicit ledger atom requires an explicit stance"
+                raise InvalidArgumentError(msg)
 
 
 __all__ = [

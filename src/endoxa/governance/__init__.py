@@ -33,6 +33,7 @@ decision surface.
 """
 
 from endoxa.governance.derive import LEDGER_EVENT_TYPES, DerivedLedger, derive_ledger
+from endoxa.governance.formulas import parse_premise_fof, parse_query_fof
 from endoxa.governance.knowledge import EpistemicStatus
 from endoxa.governance.ledger import (
     EVIDENCE_REASONS,
@@ -48,10 +49,18 @@ from endoxa.governance.ledger import (
     SupportRef,
     TargetKind,
 )
+from endoxa.governance.metadata import Stance
 from endoxa.governance.provenance import (
     PROVENANCE_KEYS,
     RETRIEVAL_KINDS,
     SOURCE_KINDS,
+)
+from endoxa.governance.query import (
+    EntailmentResult,
+    EntailmentVerdict,
+    SolverStatus,
+    check_belief_support,
+    check_entailment,
 )
 from endoxa.governance.resolution import (
     GOVERNANCE_ACTOR,
@@ -111,21 +120,29 @@ __all__ = [
     "Constraints",
     "ContradictionTie",
     "DerivedLedger",
+    "EntailmentResult",
+    "EntailmentVerdict",
     "EpistemicStatus",
     "EvidenceReason",
     "GovernanceOutcome",
     "LedgerOp",
     "OpKind",
     "Rule",
+    "SolverStatus",
+    "Stance",
     "SupportKind",
     "SupportRef",
     "SupportState",
     "SupportVerdict",
     "TargetKind",
     "ViewEquivalence",
+    "check_belief_support",
+    "check_entailment",
     "compare_to_state",
     "derive_ledger",
     "govern",
+    "parse_premise_fof",
+    "parse_query_fof",
     "reconstruct_view",
     "support_verdict",
 ]

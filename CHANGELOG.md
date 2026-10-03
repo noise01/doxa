@@ -6,7 +6,52 @@ not a promise.
 
 ## [Unreleased]
 
+### Fixed
+
+- `govern` no longer reports an UNKNOWN solver verdict as consistent.
+  `GovernanceOutcome.consistent` is now `bool | None`: existing SAT/conflict and
+  supersession results keep their Boolean values; UNKNOWN returns `None` with no
+  operations. `undecided` retains its separate meaning of a known conflict with
+  no selected operation. Callers that treated every falsey value as a confirmed
+  conflict must distinguish `None` explicitly. Field order is unchanged.
+- Governance and revision queries propagate both `max_rounds` and `max_matches`
+  through candidate, rule, link, support and tie-completion re-checks. Existing
+  positional inputs remain valid and the new caps are keyword-only. Limits apply
+  per solver check, not cumulatively to the search or as a wall-clock guarantee;
+  either omitted limit remains unbounded. An UNKNOWN fact trial cannot select a
+  revision through the link-clash progress fallback.
+- TPTP output preserves every operand of n-ary `And` and `Or`, including
+  flattened nested connectives. Binary spelling, including implication arrows,
+  and the existing zero/one-operand normalization are unchanged.
+
 ### Added
+
+- Check legacy constructor positions and refutation behavior, plus the public
+  governance API from a minimal independent consumer in an isolated process.
+  Document the explicit choices when adopting the additive entry points and
+  the conditions for future compatibility cleanup, without a removal deadline.
+
+- Add explicit Belief atom/stance/source fields, a separate-ID `from_atom`
+  factory, ID alias and plain field record codecs. Governance and revision
+  resolve formulas from atoms and return IDs through operations, cores and
+  holds. Governance rejects duplicate IDs, duplicate atom ownership and
+  belief/rule ID collisions; support excludes all aliases of its target.
+- Ledger operations and reconstructed states retain optional explicit
+  atom/stance/source. Replay refuses an ID's changing atom or origin kind,
+  while explicit stance updates can move a preference band. Actor stays the
+  writer. Legacy replay and missing metadata remain distinct; strict restore
+  refuses to guess a belief from unrecorded fields.
+- Add `parse_premise_fof`, `parse_query_fof` and `Rule.from_fof` for strict
+  single closed Boolean FOF statements. Names and source text are preserved;
+  premise/query roles are checked without assigning priority or provenance.
+  Legacy constructors, FOF parser and entailment query remain compatible.
+
+- Add `check_entailment`, `check_belief_support` and `EntailmentResult` to
+  `endoxa.governance`. Both queries require SAT premises before testing the
+  conclusion and distinguish inconsistent premises from UNKNOWN. Ordinary
+  entailment retains the conclusion in its premises; support excludes all
+  beliefs with the same ground atom in either polarity. Invalid inputs are
+  rejected explicitly. The existing `revision.entails` behavior is unchanged.
 
 - **`compare_to_state` names the target it counted as `unattributed`.** The
   column had a count and no line: a target whose evidence tally disagreed was
@@ -162,6 +207,21 @@ A caller who wants to handle a bad rule string can now name what gets raised.
 Before this the answer was `lark.exceptions.UnexpectedToken`.
 
 ### Added
+
+- Add explicit Belief atom/stance/source fields, a separate-ID `from_atom`
+  factory, ID alias and plain field record codecs. Governance and revision
+  resolve formulas from atoms and return IDs through operations, cores and
+  holds. Governance rejects duplicate IDs, duplicate atom ownership and
+  belief/rule ID collisions; support excludes all aliases of its target.
+- Ledger operations and reconstructed states retain optional explicit
+  atom/stance/source. Replay refuses an ID's changing atom or origin kind,
+  while explicit stance updates can move a preference band. Actor stays the
+  writer. Legacy replay and missing metadata remain distinct; strict restore
+  refuses to guess a belief from unrecorded fields.
+- Add `parse_premise_fof`, `parse_query_fof` and `Rule.from_fof` for strict
+  single closed Boolean FOF statements. Names and source text are preserved;
+  premise/query roles are checked without assigning priority or provenance.
+  Legacy constructors, FOF parser and entailment query remain compatible.
 
 - **`endoxa.errors`.** Every error this package raises on its own behalf derives
   from `EndoxaError`, and each also derives from the built-in a caller would
