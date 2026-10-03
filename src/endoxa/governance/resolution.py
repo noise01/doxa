@@ -34,11 +34,21 @@ Depends only on the bundled solver (:mod:`endoxa.solver`) and on this package's 
 revision logic (:mod:`endoxa.governance.revision`).
 """
 
-from collections.abc import Collection, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from endoxa.errors import InvalidArgumentError
+from endoxa.governance.formulas import parse_premise_fof
 from endoxa.governance.ledger import LedgerOp
+from endoxa.governance.metadata import (
+    Stance,
+    canonical_atom,
+    validate_confidence,
+    validate_id,
+    validate_source,
+    validate_stance,
+)
 from endoxa.governance.revision import (
     ContradictionTie,
     check_consistency,
@@ -48,6 +58,7 @@ from endoxa.governance.revision import (
     select_tie_question_target,
     select_verified_revision_target,
 )
+from endoxa.governance.revision.facts import parse_fact_to_expr
 from endoxa.solver import Expr, parse_fof
 
 #: ``actor`` stamped on the operations governance itself decides. A host that
@@ -67,19 +78,90 @@ class Belief:
     """One belief handed to governance.
 
     Attributes:
-        target: The belief's identity -- its expression string (``mortal(socrates)``).
+        target: The belief ID. Legacy inputs use their expression string as ID.
         truth_value: What it claims.
-        confidence: Its credence. 1.0 is inviolable and only ask-user grounding
-            confers it.
+        confidence: Its credence. Under the existing policy an asserted belief
+            at 1.0 is protected, while a hypothesis remains revisable even at 1.0.
         context: The role it was born under. The revision preference reads this to
             tell a conjecture from an assertion (``hypothesis``), and
-            getting it wrong silently disables that preference.
+            getting it wrong silently disables that preference. Retained as a
+            fallback only when stance is absent; it never supplies source.
+        atom: Explicit flat ground atom, normalized independently of target.
+        stance: asserted or hypothesis, independent of source and confidence.
+            A nonempty context that implies the opposite stance is refused.
+        source: Optional origin kind from SOURCE_KINDS, never a revision priority.
     """
 
     target: str
     truth_value: bool
     confidence: float
     context: str = ""
+    atom: str | None = field(default=None, kw_only=True)
+    stance: Stance | None = field(default=None, kw_only=True)
+    source: str | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        validate_stance(self.stance)
+        validate_source(self.source)
+        if self.atom is not None:
+            validate_confidence(self.confidence)
+            if not isinstance(self.truth_value, bool):
+                msg = "Explicit belief truth_value must be a bool"
+                raise InvalidArgumentError(msg)
+            validate_id(self.target)
+            object.__setattr__(self, "atom", canonical_atom(self.atom))
+        if self.stance is not None and self.context:
+            legacy = "hypothesis" if self.context == "hypothesis" else "asserted"
+            if self.stance != legacy:
+                msg = "Explicit stance conflicts with legacy context"
+                raise InvalidArgumentError(msg)
+
+    @property
+    def id(self) -> str:
+        """Stable identity used by operations and support references."""
+        return self.target
+
+    @classmethod
+    def from_atom(  # noqa: PLR0913 - explicit identity, claim and metadata
+        cls,
+        *,
+        id: str,  # noqa: A002 - the public identity name
+        atom: str,
+        truth_value: bool,
+        confidence: float,
+        stance: Stance = "asserted",
+        source: str | None = None,
+    ) -> Belief:
+        """Build a belief with a separate ID and normalized flat ground atom.
+
+        No role or source determines stance or confidence. An ID must remain
+        attached to the same atom throughout its recorded lifetime.
+        """
+        validate_id(id)
+        if not isinstance(truth_value, bool):
+            msg = "truth_value must be a bool"
+            raise InvalidArgumentError(msg)
+        if stance is None:
+            msg = "from_atom requires an explicit stance"
+            raise InvalidArgumentError(msg)
+        return cls(id, truth_value, confidence, atom=canonical_atom(atom), stance=stance, source=source)
+
+    def to_record(self) -> dict[str, Any]:
+        """Return plain fields for a host to persist, including explicit omissions."""
+        return asdict(self)
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> Belief:
+        """Restore a field record without inferring source or stance from actor.
+
+        Legacy records may omit atom, stance and source. This is a field codec,
+        not an adapter for a host database or an implementation of storage.
+        """
+        try:
+            return cls(**dict(record))
+        except TypeError as error:
+            msg = "Invalid belief field record"
+            raise InvalidArgumentError(msg) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +181,23 @@ class Rule:
     axiom: str
     confidence: float
     defeasible: bool = True
+
+    @classmethod
+    def from_fof(cls, text: str, *, confidence: float, defeasible: bool, name: str | None = None) -> Rule:
+        """Build a rule through the strict premise entry point.
+
+        Name defaults to the FOF name; an override is the operation's rule ID.
+        The annotated source remains in axiom, retaining the original FOF name
+        and role. Neither role nor name chooses defeasibility.
+        """
+        validate_confidence(confidence)
+        if not isinstance(defeasible, bool):
+            msg = "defeasible must be a bool"
+            raise InvalidArgumentError(msg)
+        fof_name, _role, _formula = parse_premise_fof(text)
+        target = fof_name if name is None else name
+        validate_id(target)
+        return cls(target, text, confidence, defeasible)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,9 +227,11 @@ class GovernanceOutcome:
 
     Attributes:
         consistent: Whether the beliefs are consistent under the constraints.
-            ``True`` means there was nothing to decide.
+            ``True`` is a SAT certificate; ``False`` denotes a known conflict
+            or recency supersession. ``None`` means the solver was inconclusive,
+            so no consistency certificate or operation is available.
         ops: The operations governance performs, in the order it performs them.
-            Empty when consistent, and also when a conflict is real but nothing is
+            Empty when consistent or inconclusive, and also when a conflict is real but nothing is
             revisable -- the correct detect-but-hold-silently outcome.
         hold: The pair a ``hold`` names, carrying what an answer would ground.
             ``None`` unless the operations contain a ``hold``.
@@ -140,7 +241,7 @@ class GovernanceOutcome:
             a host that reports "asked" for it would be lying about its own state.
     """
 
-    consistent: bool
+    consistent: bool | None
     ops: tuple[LedgerOp, ...] = ()
     hold: ContradictionTie | None = None
     undecided: bool = False
@@ -165,43 +266,65 @@ def govern(
     *,
     escalated: str | None = None,
     max_rounds: int | None = None,
+    max_matches: int | None = None,
 ) -> GovernanceOutcome:
     """Decide what the governance layer does with these beliefs.
 
     Args:
         beliefs: The belief set to govern.
         constraints: The rules and inviolable axioms they live under.
-        escalated: The atom whose assertion raised the conflict, when the host
+        escalated: The belief ID whose assertion raised the conflict, when the host
             knows it. Only used for recency supersession: a newer functional claim
             supersedes the older one it excludes, whatever their confidences, because
             a state change is not a miscalibration.
-        max_rounds: E-matching round budget for the consistency checks; ``None``
-            uses the solver default.
+        max_rounds: E-matching round cap per solver check, including all candidate
+            re-checks. ``None`` leaves rounds unbounded.
+        max_matches: Candidate-binding cap across the rounds of each solver check.
+            ``None`` leaves matching work unbounded. Both caps are renewed per
+            check, not cumulative across governance, and are not wall-clock limits.
 
     Returns:
-        The operations to perform. A consistent belief set yields none.
+        The operations to perform, naming belief and rule IDs. A consistent
+        belief set yields none. UNKNOWN yields none and sets ``consistent=None``.
+        ``undecided`` is reserved for known conflicts without a selected operation.
+        Duplicate IDs, belief/rule ID collisions and
+        multiple IDs for one atom are refused rather than losing a core mapping.
     """
     held = _belief_map(beliefs)
+    rule_ids = [rule.name for rule in constraints.rules]
+    for rule_id in rule_ids:
+        validate_id(rule_id)
+    if len(set(rule_ids)) != len(rule_ids) or set(rule_ids) & held.keys():
+        msg = "Rule IDs must be unique and distinct from belief IDs"
+        raise InvalidArgumentError(msg)
+    if escalated is not None and any(belief.atom is not None for belief in beliefs) and escalated not in held:
+        msg = f"Escalated belief ID not found: {escalated!r}"
+        raise InvalidArgumentError(msg)
     theory = _theory(constraints)
 
     superseded = _supersede(held, escalated, constraints.functional_predicates)
     if superseded is not None:
         return GovernanceOutcome(consistent=False, ops=(superseded,))
 
-    verdict, unsat_core, expr_to_node_id = check_consistency(held, theory.active, max_rounds=max_rounds)
-    if verdict != "UNSAT":
+    verdict, unsat_core, expr_to_node_id = check_consistency(
+        held, theory.active, max_rounds=max_rounds, max_matches=max_matches
+    )
+    if verdict == "UNKNOWN":
+        return GovernanceOutcome(consistent=None)
+    if verdict == "SAT":
         return GovernanceOutcome(consistent=True)
 
-    return _resolve(held, theory, unsat_core, expr_to_node_id, max_rounds=max_rounds)
+    return _resolve(held, theory, unsat_core, expr_to_node_id, max_rounds=max_rounds, max_matches=max_matches)
 
 
-def _resolve(
+def _resolve(  # noqa: PLR0913 - conflict description plus the two solver caps
     beliefs: dict[str, dict[str, Any]],
     theory: _Theory,
     unsat_core: list[Expr],
     expr_to_node_id: dict[str, str],
     *,
     max_rounds: int | None,
+    max_matches: int | None,
 ) -> GovernanceOutcome:
     """Pick what to give up.
 
@@ -219,8 +342,9 @@ def _resolve(
         expr_to_node_id,
         theory.active,
         max_rounds=max_rounds,
+        max_matches=max_matches,
     )
-    rule_culprits = _rule_culprits(beliefs, theory)
+    rule_culprits = _rule_culprits(beliefs, theory, max_rounds=max_rounds, max_matches=max_matches)
 
     fact_confidence = fact_target[1].get("confidence", 1.0) if fact_target is not None else None
     decision = choose_revision_candidate(fact_confidence, [rule.confidence for rule in rule_culprits])
@@ -232,6 +356,7 @@ def _resolve(
             expr_to_node_id,
             theory.active,
             max_rounds=max_rounds,
+            max_matches=max_matches,
         )
         if tie is None:
             # Real conflict, nothing revisable and no answerable pair: governance
@@ -274,7 +399,13 @@ def _resolve(
     return GovernanceOutcome(consistent=False, ops=tuple(ops))
 
 
-def _rule_culprits(beliefs: dict[str, dict[str, Any]], theory: _Theory) -> list[Rule]:
+def _rule_culprits(
+    beliefs: dict[str, dict[str, Any]],
+    theory: _Theory,
+    *,
+    max_rounds: int | None,
+    max_matches: int | None,
+) -> list[Rule]:
     """Find the defeasible rules whose removal alone would restore consistency.
 
     ``find_rule_culprits`` answers in exprs, so the rules are recovered by object
@@ -284,7 +415,14 @@ def _rule_culprits(beliefs: dict[str, dict[str, Any]], theory: _Theory) -> list[
     if not theory.defeasible:
         return []
     culprit_ids = {
-        id(expr) for expr in find_rule_culprits(beliefs, theory.active, [expr for _rule, expr in theory.defeasible])
+        id(expr)
+        for expr in find_rule_culprits(
+            beliefs,
+            theory.active,
+            [expr for _rule, expr in theory.defeasible],
+            max_rounds=max_rounds,
+            max_matches=max_matches,
+        )
     }
     return [rule for rule, expr in theory.defeasible if id(expr) in culprit_ids]
 
@@ -338,15 +476,31 @@ def _belief_map(beliefs: Sequence[Belief]) -> dict[str, dict[str, Any]]:
     belief store writes and the revision preference reads; putting it under
     ``role`` would silently disable the hypothesis preference.
     """
-    return {
-        belief.target: {
+    held: dict[str, dict[str, Any]] = {}
+    owners: dict[str, str] = {}
+    for belief in beliefs:
+        validate_id(belief.id)
+        if belief.id in held:
+            msg = f"Duplicate belief ID: {belief.id!r}"
+            raise InvalidArgumentError(msg)
+        expression = belief.target if belief.atom is None else belief.atom
+        key = str(parse_fact_to_expr(expression))
+        if key in owners:
+            msg = f"Atom {expression!r} has multiple belief IDs"
+            raise InvalidArgumentError(msg)
+        owners[key] = belief.id
+        data: dict[str, Any] = {
             "truth_value": belief.truth_value,
             "confidence": belief.confidence,
             "belief_context": belief.context,
+            "stance": belief.stance,
+            "source": belief.source,
             "node_type": "atom",
         }
-        for belief in beliefs
-    }
+        if belief.atom is not None:
+            data["atom"] = belief.atom
+        held[belief.id] = data
+    return held
 
 
 def _theory(constraints: Constraints) -> _Theory:

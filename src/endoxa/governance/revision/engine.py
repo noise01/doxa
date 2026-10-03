@@ -1,8 +1,17 @@
+"""Revision queries with optional per-check E-matching limits.
+
+Round and candidate-binding limits are renewed for each solver check, including
+candidate re-checks. They are not a cumulative search budget or a wall-clock limit.
+``None`` leaves the corresponding dimension unbounded. Inconclusive checks never
+certify a candidate as restoring consistency.
+"""
+
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from endoxa.governance.metadata import atom_text, validate_atom_ids
 from endoxa.governance.revision.facts import parse_fact_to_expr
 from endoxa.governance.revision.links import PredicateConstraints, PredicateLink, predicate_clauses
 from endoxa.governance.revision.preference import is_hypothesis, preference_bands, revision_candidates
@@ -27,8 +36,10 @@ _UNSETTLEABLE_ARITY = 2
 def build_assumptions(beliefs: dict[str, dict[str, Any]]) -> tuple[list[Expr], dict[str, str]]:
     """Build the solver assumption list and a stringified-expression -> node-id mapping.
 
-    Unparseable facts are skipped. The mapping lets callers translate an UNSAT core back to the
-    belief node identifiers that produced it.
+    An explicit atom is used when present, otherwise the legacy node ID is
+    parsed. Explicit maps reject malformed atoms and duplicate atom ownership;
+    legacy unparseable facts remain skipped. The mapping translates an UNSAT
+    core back to IDs without interpreting IDs as formulas in the explicit case.
 
     Args:
         beliefs: Mapping of belief node ID to its data (``truth_value``, ``role``, ``confidence``).
@@ -36,12 +47,13 @@ def build_assumptions(beliefs: dict[str, dict[str, Any]]) -> tuple[list[Expr], d
     Returns:
         A tuple of (assumption expressions, expression-string -> node-id mapping).
     """
+    validate_atom_ids(beliefs)
     assumptions: list[Expr] = []
     expr_to_node_id: dict[str, str] = {}
 
     for node_id, data in beliefs.items():
         try:
-            expr = parse_fact_to_expr(node_id)
+            expr = parse_fact_to_expr(atom_text(node_id, data))
         except Exception:  # noqa: BLE001, S112 - silently skip facts that cannot be parsed
             continue
 
@@ -59,6 +71,7 @@ def check_consistency(
     rule_exprs: list[Expr],
     *,
     max_rounds: int | None = None,
+    max_matches: int | None = None,
 ) -> tuple[Literal["SAT", "UNSAT", "UNKNOWN"], list[Expr], dict[str, str]]:
     """Run an SMT consistency check of the belief atoms under the given rules.
 
@@ -72,6 +85,7 @@ def check_consistency(
         max_rounds: Optional cap on E-matching rounds. When exceeded the result
             is ``"UNKNOWN"`` (deliberation cut before converging). ``None`` leaves
             the check unbounded.
+        max_matches: Optional candidate-binding cap per solver check, across its rounds.
 
     Returns:
         A tuple of (result, unsat_core, expr_to_node_id). The unsat_core is
@@ -81,7 +95,7 @@ def check_consistency(
     for expr in rule_exprs:
         solver.add(expr)
     assumptions, expr_to_node_id = build_assumptions(beliefs)
-    result = solver.check(*assumptions, max_rounds=max_rounds)
+    result = solver.check(*assumptions, max_rounds=max_rounds, max_matches=max_matches)
     unsat_core = solver.unsat_core() if result == "UNSAT" else []
     return result, unsat_core, expr_to_node_id
 
@@ -92,6 +106,7 @@ def entails(
     target: str,
     *,
     max_rounds: int | None = None,
+    max_matches: int | None = None,
 ) -> Literal["ENTAILED", "NOT_ENTAILED", "UNKNOWN"]:
     """Decide whether ``target`` is entailed by the beliefs under the given rules.
 
@@ -115,8 +130,9 @@ def entails(
         beliefs: Mapping of belief node ID to its data (``truth_value`` etc.).
         rule_exprs: The active rule expressions to assert as hard constraints.
         target: The atom to verify, as a fact string (e.g. ``"mortal(socrates)"``).
-        max_rounds: Optional cap on E-matching rounds (the deliberation budget).
+        max_rounds: Optional E-matching round cap per solver check.
             When exceeded the verdict is ``"UNKNOWN"``.
+        max_matches: Optional candidate-binding cap per solver check, across its rounds.
 
     Returns:
         ``"ENTAILED"`` when the negation is unsatisfiable (target provable),
@@ -138,7 +154,7 @@ def entails(
     excluded = {str(target_expr), str(negated_target)}
     assumptions = [a for a in assumptions if str(a) not in excluded]
     assumptions.append(negated_target)
-    result = solver.check(*assumptions, max_rounds=max_rounds)
+    result = solver.check(*assumptions, max_rounds=max_rounds, max_matches=max_matches)
     if result == "UNSAT":
         return "ENTAILED"
     if result == "SAT":
@@ -146,11 +162,14 @@ def entails(
     return "UNKNOWN"
 
 
-def find_rule_culprits(
+def find_rule_culprits(  # noqa: PLR0913 - preserve existing inputs plus the two solver caps
     beliefs: dict[str, dict[str, Any]],
     active_rule_exprs: list[Expr],
     defeasible_rule_exprs: list[Expr],
     links: PredicateConstraints | None = None,
+    *,
+    max_rounds: int | None = None,
+    max_matches: int | None = None,
 ) -> list[Expr]:
     """Find defeasible rules whose removal alone restores consistency.
 
@@ -174,6 +193,8 @@ def find_rule_culprits(
         defeasible_rule_exprs: The subset of active rules eligible for retraction.
         links: The link sources whose ground clauses constrain the
             re-check. ``None`` (the default) re-checks without them.
+        max_rounds: Optional E-matching round cap per solver check.
+        max_matches: Optional candidate-binding cap per solver check, across its rounds.
 
     Returns:
         The defeasible rule expressions whose removal restores SAT.
@@ -182,19 +203,22 @@ def find_rule_culprits(
     culprits: list[Expr] = []
     for rule in defeasible_rule_exprs:
         reduced = [r for r in active_rule_exprs if r is not rule]
-        result, _, _ = check_consistency(beliefs, [*reduced, *link_exprs])
+        result, _, _ = check_consistency(
+            beliefs, [*reduced, *link_exprs], max_rounds=max_rounds, max_matches=max_matches
+        )
         if result == "SAT":
             culprits.append(rule)
     return culprits
 
 
-def find_supporting_rules(
+def find_supporting_rules(  # noqa: PLR0913 - preserve existing inputs plus the two solver caps
     beliefs: dict[str, dict[str, Any]],
     active_rule_exprs: list[Expr],
     defeasible_rule_exprs: list[Expr],
     target: str,
     *,
     max_rounds: int | None = None,
+    max_matches: int | None = None,
 ) -> list[Expr]:
     """Find defeasible rules ``target`` cannot be derived without.
 
@@ -227,7 +251,8 @@ def find_supporting_rules(
             non-defeasible base axioms are excluded because an edge to a rule
             that can never be retracted could never fire.
         target: The entailed atom whose supports are sought, as a fact string.
-        max_rounds: Optional cap on E-matching rounds (the deliberation budget).
+        max_rounds: Optional E-matching round cap per solver check.
+        max_matches: Optional candidate-binding cap per solver check, across its rounds.
 
     Returns:
         The defeasible rule expressions whose removal costs the entailment.
@@ -236,12 +261,12 @@ def find_supporting_rules(
     # this guard an underivable target would report every rule as a support,
     # since dropping any of them leaves it just as underivable. An inconclusive
     # verdict stops here too, for the reason above.
-    if entails(beliefs, active_rule_exprs, target, max_rounds=max_rounds) != "ENTAILED":
+    if entails(beliefs, active_rule_exprs, target, max_rounds=max_rounds, max_matches=max_matches) != "ENTAILED":
         return []
     supports: list[Expr] = []
     for rule in defeasible_rule_exprs:
         reduced = [r for r in active_rule_exprs if r is not rule]
-        if entails(beliefs, reduced, target, max_rounds=max_rounds) == "NOT_ENTAILED":
+        if entails(beliefs, reduced, target, max_rounds=max_rounds, max_matches=max_matches) == "NOT_ENTAILED":
             supports.append(rule)
     return supports
 
@@ -250,6 +275,9 @@ def find_link_culprits(
     beliefs: dict[str, dict[str, Any]],
     active_rule_exprs: list[Expr],
     links: PredicateConstraints | None = None,
+    *,
+    max_rounds: int | None = None,
+    max_matches: int | None = None,
 ) -> list[PredicateLink]:
     """Find acquired links whose retraction alone restores consistency.
 
@@ -275,6 +303,8 @@ def find_link_culprits(
             asserted throughout so a rule-driven contradiction is not blamed on a link.
         links: The link sources. ``None`` (the default) yields no candidates,
             which is the baseline before any link is populated.
+        max_rounds: Optional E-matching round cap per solver check.
+        max_matches: Optional candidate-binding cap per solver check, across its rounds.
 
     Returns:
         The links whose removal restores SAT, in the deterministic order of
@@ -285,7 +315,9 @@ def find_link_culprits(
     culprits: list[PredicateLink] = []
     for link in links.acquired_links():
         reduced_clauses = predicate_clauses(beliefs, links.without(link))
-        result, _, _ = check_consistency(beliefs, [*active_rule_exprs, *reduced_clauses])
+        result, _, _ = check_consistency(
+            beliefs, [*active_rule_exprs, *reduced_clauses], max_rounds=max_rounds, max_matches=max_matches
+        )
         if result == "SAT":
             culprits.append(link)
     return culprits
@@ -356,6 +388,7 @@ def select_verified_revision_target(  # noqa: PLR0913
     rule_exprs: list[Expr],
     *,
     max_rounds: int | None = None,
+    max_matches: int | None = None,
     links: PredicateConstraints | None = None,
 ) -> tuple[str, dict[str, Any]] | None:
     """Select a conflicting belief whose truth-flip actually restores consistency.
@@ -417,6 +450,7 @@ def select_verified_revision_target(  # noqa: PLR0913
         rule_exprs: The active rule expressions (hard constraints for the re-check).
         max_rounds: Optional E-matching round cap; an ``"UNKNOWN"`` re-check is
             treated conservatively as not resolving the conflict.
+        max_matches: Optional candidate-binding cap per solver check, across its rounds.
         links: The link sources whose ground clauses constrain the
             re-check. ``None`` (the default) re-checks without them.
 
@@ -437,9 +471,11 @@ def select_verified_revision_target(  # noqa: PLR0913
     # Sub-theory to re-check against: every belief sharing an individual with a core
     # atom (this keeps re-derivers), plus the core atoms themselves (which covers a
     # propositional conflict, whose atoms share no term).
-    core_terms: frozenset[str] = frozenset().union(*(_fact_argument_terms(nid) for nid, _ in conflict_nodes))
+    core_terms: frozenset[str] = frozenset().union(
+        *(_fact_argument_terms(atom_text(nid, data)) for nid, data in conflict_nodes)
+    )
     cluster: dict[str, dict[str, Any]] = {
-        nid: data for nid, data in beliefs.items() if core_terms & _fact_argument_terms(nid)
+        nid: data for nid, data in beliefs.items() if core_terms & _fact_argument_terms(atom_text(nid, data))
     }
     for nid, data in conflict_nodes:
         cluster.setdefault(nid, data)
@@ -455,10 +491,12 @@ def select_verified_revision_target(  # noqa: PLR0913
             flipped = {**data, "truth_value": not data.get("truth_value", True)}
             trial = {**cluster, node_id: flipped}
             trial_clauses = predicate_clauses(trial, links)
-            result, _, _ = check_consistency(trial, [*rule_exprs, *trial_clauses], max_rounds=max_rounds)
+            result, _, _ = check_consistency(
+                trial, [*rule_exprs, *trial_clauses], max_rounds=max_rounds, max_matches=max_matches
+            )
             if result == "SAT":
                 settling.append((node_id, data))
-            elif progress_target is None and len(trial_clauses) < baseline_clashes:
+            elif result == "UNSAT" and progress_target is None and len(trial_clauses) < baseline_clashes:
                 progress_target = (node_id, data)
         if len(settling) == 1:
             return settling[0]

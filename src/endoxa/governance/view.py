@@ -28,14 +28,17 @@ duplicates a rule the host also holds, and it is deliberate: a view that gave up
 on confidence could not tell a correct derivation from one that had lost half its
 evidence.
 
-Pure and dependency-free: stdlib only.
+Pure: its own field schemas and metadata, with no storage or I/O.
 """
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
+from endoxa.errors import InvalidArgumentError
 from endoxa.governance.ledger import LedgerOp, TargetKind
+from endoxa.governance.metadata import Stance
+from endoxa.governance.resolution import Belief
 
 BeliefStatus = Literal["HELD", "UNRESOLVED"]
 
@@ -80,12 +83,16 @@ class BeliefState:
             and none was derived (an unmarked belief; see ``_DEFAULT_CONFIDENCE``
             for how the preference reads that).
         status: ``HELD`` or ``UNRESOLVED``.
-        context: The role the target was born under (``belief_context`` on the
+        context: Legacy actor fallback only. Explicit metadata never fills it
+            from the writer. In old records this is the role the target was born under (``belief_context`` on the
             beliefs), which is what the revision preference reads to tell a
             conjecture from an assertion.
         held_with: The other side of the tie, while unresolved.
         released_by: The ``origin_event_id`` of the operation that ended the last
             hold, or ``None`` when it was never held or is held still.
+        atom: Explicit recorded ground atom, or None when not recorded.
+        stance: Explicit recorded standing, or None when not recorded.
+        source: Explicit recorded origin kind, or None when not recorded.
         evidence_prior: The credence burned in at the first piece of evidence,
             and the for/against tally since. Kept because the fold
             is path-dependent -- the posterior cannot be recomputed from the
@@ -105,6 +112,27 @@ class BeliefState:
     evidence_prior: float | None = None
     evidence_for: int = 0
     evidence_against: int = 0
+    atom: str | None = field(default=None, kw_only=True)
+    stance: Stance | None = field(default=None, kw_only=True)
+    source: str | None = field(default=None, kw_only=True)
+
+    def to_belief(self) -> Belief:
+        """Restore a fully recorded explicit belief, never guessing missing metadata.
+
+        Legacy and partial views remain readable but cannot be converted by this
+        strict entry point. The host may still use its own legacy adapter.
+        """
+        if self.target_kind != "atom" or self.atom is None or self.stance is None or self.confidence is None:
+            msg = "A recorded atom, stance and confidence are required to restore a belief"
+            raise InvalidArgumentError(msg)
+        return Belief.from_atom(
+            id=self.target,
+            atom=self.atom,
+            truth_value=self.truth_value,
+            confidence=self.confidence,
+            stance=self.stance,
+            source=self.source,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,8 +229,9 @@ def reconstruct_view(
         state = view.get(op.target) or BeliefState(
             target=op.target,
             target_kind=op.target_kind,
-            context=op.actor,
+            context=op.actor if op.atom is None and op.stance is None and op.source is None else "",
         )
+        state = _metadata_state(state, op)
         view[op.target] = _apply(
             state,
             op,
@@ -215,6 +244,26 @@ def reconstruct_view(
             view[op.partner] = replace(partner, status=UNRESOLVED, held_with=op.target, released_by=None)
         _release_holds(view, op)
     return view
+
+
+def _metadata_state(state: BeliefState, op: LedgerOp) -> BeliefState:
+    if state.atom is not None and (
+        op.target_kind != state.target_kind or (op.atom is not None and op.atom != state.atom)
+    ):
+        msg = f"Belief ID {op.target!r} was registered with another atom or target kind"
+        raise InvalidArgumentError(msg)
+    if op.atom is not None and state.target_kind != "atom":
+        msg = f"Belief ID {op.target!r} collides with a rule ID"
+        raise InvalidArgumentError(msg)
+    if state.source is not None and op.source is not None and state.source != op.source:
+        msg = f"Recorded source kind changed for {op.target!r}"
+        raise InvalidArgumentError(msg)
+    return replace(
+        state,
+        atom=state.atom if op.atom is None else op.atom,
+        stance=state.stance if op.stance is None else op.stance,
+        source=state.source if op.source is None else op.source,
+    )
 
 
 def _apply(
@@ -312,7 +361,8 @@ def _band_key(state: BeliefState) -> tuple[bool, float]:
     ``band_key``; see ``_CONFIDENCE_EPSILON`` on why there are two.
     """
     confidence = _DEFAULT_CONFIDENCE if state.confidence is None else state.confidence
-    return (state.context != _HYPOTHESIS, confidence)
+    hypothesis = state.stance == _HYPOTHESIS if state.stance is not None else state.context == _HYPOTHESIS
+    return (not hypothesis, confidence)
 
 
 def _same_band(left: BeliefState, right: BeliefState) -> bool:
