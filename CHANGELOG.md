@@ -6,6 +6,15 @@ not a promise.
 
 ## [Unreleased]
 
+## [0.6.1]
+
+### Fixed
+
+- Assumption cores follow the literal actually assigned on the SAT trail when
+  both polarities are supplied. Repeated solver checks discard earlier
+  assumption decisions and clear stale cores, preserving core attribution to
+  the current assumptions under the fixed base clauses.
+
 ## [0.6.0]
 
 This pre-1.0 minor release contains breaking API changes. Old constructors,

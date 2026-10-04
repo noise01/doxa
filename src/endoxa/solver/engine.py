@@ -149,13 +149,16 @@ class SMTEngine:
         a contradiction derived from the ground clauses stays sound however
         the search was cut short.
         """
+        self.unsat_core_exprs = []
         if self.is_unsat:
             return "UNSAT"
 
+        # Decisions belong to one check's assumptions, not to the next call.
+        # Keep base propagation and learned clauses, but discard old decisions
+        # before encoding or selecting the new assumptions.
+        self.sat.backtrack(0)
         if assumptions is None:
             assumptions = []
-
-        self.unsat_core_exprs = []
 
         assumptions_lits: list[Lit] = []
         for scope_var in self.scopes:
