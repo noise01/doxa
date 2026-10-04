@@ -6,6 +6,8 @@ not a promise.
 
 ## [Unreleased]
 
+## [0.7.0]
+
 ### Added
 
 - Read-only `check_belief_consistency` with immutable `BeliefAssumption` and
