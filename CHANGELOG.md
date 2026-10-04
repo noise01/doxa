@@ -6,6 +6,11 @@ not a promise.
 
 ## [Unreleased]
 
+### Fixed
+
+- Connect predicate truth assignments to congruence closure so equal arguments
+  cannot give congruent predicates opposite Boolean values.
+
 ## [0.6.1]
 
 ### Fixed
