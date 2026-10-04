@@ -32,6 +32,7 @@ What ``__all__`` exports is the API: the ledger schema, the derived view, and th
 decision surface.
 """
 
+from endoxa.governance.consistency import BeliefAssumption, BeliefConsistencyResult, check_belief_consistency
 from endoxa.governance.derive import LEDGER_EVENT_TYPES, DerivedLedger, derive_ledger
 from endoxa.governance.formulas import parse_premise_fof, parse_query_fof
 from endoxa.governance.knowledge import EpistemicStatus
@@ -116,6 +117,8 @@ __all__ = [
     "UNRESOLVED",
     "UNSUPPORTED",
     "Belief",
+    "BeliefAssumption",
+    "BeliefConsistencyResult",
     "BeliefState",
     "Constraints",
     "ContradictionTie",
@@ -136,6 +139,7 @@ __all__ = [
     "SupportVerdict",
     "TargetKind",
     "ViewEquivalence",
+    "check_belief_consistency",
     "check_belief_support",
     "check_entailment",
     "compare_to_state",
