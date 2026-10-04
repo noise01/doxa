@@ -6,6 +6,14 @@ not a promise.
 
 ## [Unreleased]
 
+### Added
+
+- Read-only `check_belief_consistency` with immutable `BeliefAssumption` and
+  `BeliefConsistencyResult` records. Distinct IDs may supply the same atom in
+  either polarity, with complete signed ownership and an assumption core.
+  Existing governance and revision ownership remain strict; no operation is
+  selected or applied.
+
 ## [0.6.2]
 
 ### Fixed

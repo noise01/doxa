@@ -184,6 +184,61 @@ a nonempty string ID and a separate `atom` field; supplied `truth_value` must be
 Boolean and omission means true. Both queries stop after UNSAT or UNKNOWN
 premises, without querying a conclusion.
 
+## Checking multiple owners without revision
+
+`check_belief_consistency` accepts distinct belief IDs for the same atom, in
+both polarities. The host submits only currently adopted beliefs; this function
+neither selects them nor changes their records or a ledger.
+
+```python
+from endoxa.governance import Belief, check_belief_consistency
+
+beliefs = [
+    Belief(id="report:1", atom="open(door)", truth_value=True, confidence=0.7, stance="asserted"),
+    Belief(id="report:2", atom="open( door )", truth_value=True, confidence=0.5, stance="hypothesis"),
+    Belief(id="report:3", atom="open(door)", truth_value=False, confidence=0.8, stance="asserted"),
+]
+result = check_belief_consistency(beliefs, max_rounds=4, max_matches=32)
+assert result.status == "UNSAT"
+positive = next(item for item in result.core if item.truth_value)
+assert positive.owner_ids == ("report:1", "report:2")
+assert check_belief_consistency(beliefs[1:]).status == "UNSAT"
+```
+
+Each immutable `BeliefAssumption` groups a canonical atom, its Boolean polarity,
+and sorted owner IDs. `BeliefConsistencyResult.assumptions` includes all submitted
+signed groups; `.core` is an assumption subset inconsistent with the fixed
+`hard_axioms`. Hard axioms are closed premise FOF strings accepted by
+`parse_premise_fof`. An empty UNSAT core can mean the axioms already conflict.
+The core need not be minimal or unique: owners supply a premise, rather than
+being individually judged wrong or selected for withdrawal. Results are ordered
+by atom and polarity, with false before true.
+
+SAT and UNKNOWN have empty cores. UNKNOWN is an inconclusive check, not a
+consistency certificate or a detected conflict. Duplicate IDs and invalid inputs
+raise errors. `max_rounds` and `max_matches` accept nonnegative integers or None,
+excluding bool; they bound quantifier work per check, not wall-clock time.
+Stance, confidence and source do not rank owners here. The host retains inactive
+records, provenance and snapshot versions and decides what to do next.
+
+This additive query does not relax `govern` or the revision-map APIs' unique atom
+ownership, and does not change their operation meanings. It proposes no
+withdrawal and draws no conclusion from inconsistent premises.
+
+The input boundary is flat ground `Belief` atoms and closed premise FOF strings,
+not arbitrary solver ASTs. FOF equality compares individual-valued terms:
+`p(a)=p(b)` compares function terms, not the truth values of predicates. The
+grammar rejects Boolean-valued term equality, such as `$true=$false` or
+`(p(a))=(p(b))`, and Boolean arguments such as `p($false)`. `$true` and `$false`
+are still accepted in formula positions. General Boolean equality defects in the
+lower-level `Solver` remain unfixed; this API does not extend that theory.
+Quantified checks inherit the solver's E-matching limitations and are not a
+complete first-order decision procedure. A verdict is not an independently
+checked proof certificate.
+
+An owner set is not an executable withdrawal set. Removing one owner can leave
+the same premise supplied by another, as the example's final assertion shows.
+
 ## Explicit identity and recorded metadata
 
 ```python
