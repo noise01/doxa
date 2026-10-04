@@ -371,10 +371,11 @@ class SATSolver:
             if seen[var]:
                 reason = self.trail.reason[var]
                 if reason is None:
-                    if (var << 1) in assumptions:
-                        core.append(var << 1)
-                    elif ((var << 1) | 1) in assumptions:
-                        core.append((var << 1) | 1)
+                    # Follow the literal actually assigned on the trail. Both
+                    # polarities may be assumptions, so choosing by variable
+                    # would replace a negative premise with its positive rival.
+                    if lit in assumptions:
+                        core.append(lit)
                 else:
                     for r_lit in reason.literals:
                         r_var = r_lit >> 1
