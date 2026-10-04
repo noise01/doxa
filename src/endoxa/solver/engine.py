@@ -98,7 +98,13 @@ class SMTEngine:
             elif not isinstance(expr.sort, BoolSort) or (
                 isinstance(expr, App) and expr.decl.name not in ("And", "Or", "Not", "Eq", "Implies")
             ):
-                self.euf.register_term(expr)
+                if isinstance(expr.sort, BoolSort):
+                    # A predicate's SAT assignment is its equality to true.
+                    # Register that link so congruent predicate applications
+                    # cannot receive opposite Boolean assignments.
+                    self.euf.register_equality(var_id, expr, global_ctx.mk_true())
+                else:
+                    self.euf.register_term(expr)
                 self.ematcher.set_term_depth(expr, depth)
 
             if add_matching_rule and isinstance(expr, Quantifier) and expr.is_forall:
