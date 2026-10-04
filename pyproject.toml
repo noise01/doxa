@@ -1,6 +1,6 @@
 [project]
 name = "endoxa"
-version = "0.6.1"
+version = "0.6.2"
 description = "Governed beliefs for LLM agents: an append-only ledger, SMT-checked consistency, defeasible revision, and calibration instruments."
 readme = "README.md"
 requires-python = ">=3.14"

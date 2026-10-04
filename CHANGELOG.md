@@ -6,6 +6,8 @@ not a promise.
 
 ## [Unreleased]
 
+## [0.6.2]
+
 ### Fixed
 
 - Connect predicate truth assignments to congruence closure so equal arguments
