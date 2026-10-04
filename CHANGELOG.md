@@ -6,6 +6,8 @@ not a promise.
 
 ## [Unreleased]
 
+## [0.6.1]
+
 ### Fixed
 
 - Assumption cores follow the literal actually assigned on the SAT trail when
