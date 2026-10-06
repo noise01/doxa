@@ -6,6 +6,31 @@ not a promise.
 
 ## [Unreleased]
 
+### Changed
+
+- Define native `Assumption`, `ConsistencyResult`, and `EntailmentResult` types
+  in `governance.results`, exported through the new `endoxa.governance` facade.
+  Remove the former Belief result names and former public governance submodules
+  without compatibility aliases. Remove the historical truth-flip and rule/link
+  adjudication implementations; premise checks and proposals are independent.
+- Replace the governance facade with Assertion, Rule, PremiseSet and an explicit
+  RevisionPolicy. Check consistency, entailment and independent support over
+  multiple individual owners; retain functional ground exclusion.
+- Propose verified zero-or-one omission changes for assertions and rules, with
+  optional candidate adoption/rejection, explicit ties and UNKNOWN deferrals,
+  full input binding and original-state diagnostics. Confidence is caller-owned.
+- Remove the historical ledger facade and its schema, event conversion, replay,
+  comparison and evidence-reason exports. Consumers own historical accounting.
+  Historical retract must never be interpreted as Withdraw.
+
+### Fixed
+
+- Retain functional ground exclusion scope across revision trials, candidate
+  rejection and consumer rechecks. Withdrawing an Assertion no longer removes
+  the exclusion of its value when a Rule can still derive it. Premise snapshots
+  retain `functional_scope`, and proposal bindings capture its candidate-inclusive
+  value independently of original adopted membership.
+
 ## [0.7.0]
 
 ### Added

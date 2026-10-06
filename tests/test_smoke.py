@@ -6,7 +6,6 @@ import endoxa
 
 PACKAGES = [
     "endoxa.governance",
-    "endoxa.governance.revision",
     "endoxa.instruments",
     "endoxa.instruments.calibration",
     "endoxa.instruments.coverage",

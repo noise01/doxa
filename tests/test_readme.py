@@ -40,14 +40,14 @@ class TestTheExampleRuns:
         """The comments assert values, and a comment is not checked by executing it."""
         namespace = _run(_blocks(README.read_text(encoding="utf-8"))[0])
         outcome = namespace["outcome"]
-        assert outcome.consistent is False
-        retracted = [op.target for op in outcome.ops if op.op == "retract"]
-        assert retracted == ["mortal(socrates)"], "the README says the 0.6-confidence claim is what gives way"
+        assert outcome.decision == "proposed"
+        assert outcome.final.status == "SAT"
+        assert outcome.changes[0].target.id == "observation-2"
 
     def test_a_broken_block_is_caught(self):
         """Both ways the real example was broken, so the detector is known to fire."""
         with pytest.raises(TypeError):
-            _run("from endoxa.governance import Rule\nRule(name='r', axiom='fof(a, axiom, p(x)).')")
+            _run("from endoxa.governance import Rule\nRule(id='r', formula='fof(a, axiom, p(x)).')")
         # Named rather than matched on the wording: a parse failure is this
         # package's own error now, so the control can say which one instead of
         # grepping a dependency's message for "unexpected".

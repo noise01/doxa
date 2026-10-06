@@ -1,408 +1,194 @@
 # endoxa
 
-**Governed beliefs for agents.** An append-only ledger, SMT-checked consistency,
-defeasible revision, and calibration instruments — a layer you give an agent,
-not a framework you build one inside.
+**Consistency checks, verified revision proposals, and independent measurements.**
+Callers own adopted membership, confidence updates, history, storage, and application.
 
-> **Status: pre-alpha.** Versions before 1.0 may move the public API.
-> Review the changelog when upgrading.
+> **Status: pre-alpha.** This unreleased API replaces the 0.7.0 governance facade.
+> It is not available in the published 0.7.0 package.
+> Review the changelog before upgrading.
 
-## The problem
+## Import boundaries
 
-An LLM agent will tell you Socrates is mortal, and twenty turns later that he is
-immortal, and never notice. It has no place to put a claim other than its own
-context, no way to check a new claim against the ones it already made, and no
-record of why it believes any of them. Asking it to be consistent is asking the
-thing that lost track to keep track.
+Use `endoxa.governance` for Assertion-based inputs, result types, checks, and
+revision proposals. `Assumption` and `ConsistencyResult` are the actual result
+type names; they are not aliases of the former Belief-based records. Their
+definitions live in `endoxa.governance.results`, with one recommended import
+surface in `endoxa.governance`. `Rule` here always means an adopted FOF premise
+record with `id`, `formula`, and `confidence`.
 
-endoxa is the place to put them.
-
-## What it does
-
-- **Checks.** Beliefs and the rules they live under go to a bundled SMT solver,
-  which answers satisfiable, unsatisfiable, or *unknown* when its deliberation
-  budget runs out — a real answer, not a failure.
-- **Decides.** On a conflict it finds what is actually to blame and orders the
-  candidates by how readily each may be given up. A rule the agent *learned* may
-  be retracted; a rule it was given may not.
-- **Holds.** When two beliefs are equally credible, the conflict cannot be
-  settled from the inside. That is a state with a name, not a coin flip.
-- **Records.** Every operation is an entry in an append-only ledger. A retracted
-  belief keeps its row and stops counting, so the history of what the agent
-  believed survives the change.
-- **Measures.** Whether the agent's confidence matched its accuracy, over what it
-  claims to know, what it claims to be able to do, and when it chooses to ask.
+Solver constructors remain in `endoxa.solver`; independent measurements remain
+in `endoxa.instruments`. Ledger schemas, event conversion, historical replay and
+state comparison belong to callers; the former `governance.legacy` path is removed.
+Former modules such as `governance.revision`, `resolution`, `metadata`, `query`,
+and `consistency` are removed, without compatibility aliases. Their obsolete
+internal truth-flip and rule/link arbitration implementations are also removed.
 
 ## Example
 
 ```python
-from endoxa.governance import Belief, Constraints, Rule, govern
+from endoxa.governance import Assertion, PremiseSet, propose_revision
 
-constraints = Constraints(
-    rules=(
-        Rule(
-            name="mortality",
-            axiom="fof(m, axiom, ![X]: (human(X) => mortal(X))).",
-            confidence=0.9,
-        ),
-    ),
+premises = PremiseSet(
+    assertions=(
+        Assertion(id="observation-1", atom="open(door)", truth_value=True, confidence=0.8),
+        Assertion(id="observation-2", atom="open(door)", truth_value=False, confidence=0.3),
+    )
 )
-beliefs = [
-    Belief(truth_value=True, confidence=1.0, id="human(socrates)", atom="human(socrates)", stance="asserted"),
-    Belief(truth_value=False, confidence=0.6, id="mortal(socrates)", atom="mortal(socrates)", stance="asserted"),
-]
-
-outcome = govern(beliefs, constraints)
-
-outcome.consistent  # False
-
-# The operations to perform, in order: here, retracting the 0.6-confidence
-# claim -- not the rule, and not the one the user asserted.
-outcome.ops
+outcome = propose_revision(premises)
+assert outcome.decision == "proposed"
+assert outcome.changes[0].target.id == "observation-2"
+assert outcome.final.status == "SAT"
+# Withdraw removes this ID from adoption. Its original negative claim stays negative.
+# Nothing has been applied or saved.
 ```
 
-`govern` decides; it does not mutate. The operations it returns are what you
-append to the ledger and apply to your own store.
+## Inputs and checking
 
-`outcome.consistent` is `True` for SAT, `False` for a detected conflict or
-recency supersession, and `None` when the solver returns UNKNOWN. An inconclusive
-check returns no operations; it is not a consistency certificate.
-`outcome.undecided` instead means a conflict is known but no operation was selected.
+`Assertion` requires keyword fields `id`, `atom`, `truth_value`, `confidence`,
+and optional `source`. Atoms are flat ground predicates; whitespace is normalized.
+IDs identify individual records. Multiple IDs may supply the same signed atom;
+duplicate IDs within a kind are errors. Changing content or polarity requires a
+new ID. A confidence update is a new input snapshot supplied by the caller.
+Confidence must be finite in [0, 1], excluding Boolean values. Source is an optional
+nonempty string and does not select a policy.
 
-`govern` and the revision queries accept `max_rounds` (quantifier-instantiation
-rounds) and `max_matches` (candidate bindings examined across those rounds).
-Each limit applies to **each solver check**, including candidate re-checks, and
-is renewed for the next check. `None` leaves that dimension unbounded. These are
-neither a cumulative governance budget nor a wall-clock deadline; a round limit
-alone does not bound matching work inside a round.
+`Rule(id, formula, confidence)` has keyword fields and a closed FOF premise string.
+Its ID is independent of an Assertion ID. `PremiseSet` contains `assertions`,
+`rules`, `hard_axioms`, `functional_predicates`, and `functional_scope`.
 
-Runnable scripts cover revision, unresolved ties, instruments, a direct ledger
-and solver expressions. See [examples/](examples/).
+- `check_consistency(premises)` returns `status`, signed `assumptions` with
+  `owner_ids`, and an assumption `core`. A core is sound with the fixed theory,
+  but need not be minimal, unique, or cover every conflict.
+  It is not a removal plan.
+  Rules constrain the check; they are not owners in this diagnostic core.
+- `check_entailment(premises, conclusion)` accepts a closed FOF conjecture string.
+  It first checks premise consistency. Its result distinguishes `ENTAILED`,
+  `NOT_ENTAILED`, `INCONSISTENT_PREMISES`, and `UNKNOWN`.
+- `check_support(premises, atom, truth_value=True)` removes all assertions of that
+  canonical atom in both polarities, retaining rules and other premises. The atom
+  need not already be adopted. It uses the same consistency guard.
 
-## A ledger without events
+Functional predicates exclude positive facts with equal leading arguments and
+different final values, at arity two or greater, over ground atoms in
+`functional_scope`. The scope defaults to the submitted Assertion atoms and can
+include explicit additional ground atoms. It supplies exclusions, not assertions.
+Preserve it when changing adoption within the same checking scope, for example
+with `dataclasses.replace`: a withdrawn value may still be derived by a Rule.
+Proposals expand this scope with a candidate Assertion's atom and keep it fixed
+for every check, including the original state and candidate rejection. The binding
+captures the original input separately from this candidate-inclusive scope.
+Consumers must validate and retain `binding.functional_scope` when rechecking and
+applying the result. Rule-only values outside this explicit ground scope do not
+automatically extend it.
+Unary predicates do not imply that different subjects exclude one another.
+This is ground exclusion, not a complete quantified functionality axiom or equality
+reasoner. For a newer value superseding an older one, give the old target
+an explicit lower withdrawal priority; novelty itself never wins.
 
-`LedgerOp` is the core data contract. You own the sequence and its persistence;
-`reconstruct_view` folds operations in their supplied order, without sorting
-timestamps. Append the operations returned by `govern` to that same sequence.
+All checks accept `max_rounds` and `max_matches`. Limits are nonnegative integers
+or `None`; they renew per solver check, not per proposal or wall-clock interval.
+Quantified E-matching is incomplete and can return `UNKNOWN`. Invalid inputs raise
+an `EndoxaError`; they are not solver uncertainty. The supported fragment is
+Boolean formulas and uninterpreted first-order logic with equality, not arithmetic.
 
-```python
-from endoxa.governance import LedgerOp, reconstruct_view
+## Revision proposals
 
-ledger = [
-    LedgerOp(
-        "assert",
-        "reading:1",
-        truth_value=True,
-        confidence=0.7,
-        atom="door_closed(room)",
-        stance="hypothesis",
-        source="tool",
-    ),
-    LedgerOp("confirm", "reading:1", actor="observer"),
-]
-state = reconstruct_view(ledger)["reading:1"]
-assert state.to_belief().atom == "door_closed(room)"
-assert state.source == "tool"
-assert len(ledger) == 2
-```
+`propose_revision(premises, policy=RevisionPolicy(), candidate=None)` accepts at
+most one new Assertion or Rule. Without a candidate it searches for a repair;
+with one it checks adoption and considers rejection alongside existing targets.
+Candidate IDs must be new within their kind.
 
-`derive_ledger` is an optional adapter for the existing audit-row dialect defined
-in `endoxa.governance.derive`. Its input has `id`, `timestamp`, `event_type` and
-`payload` fields and uses the supported event-name constants. It retains its
-conversion rules and diagnostic counts. A new integration can write `LedgerOp`
-directly; it does not need to reproduce that event vocabulary.
+`RevisionPolicy(protected, priorities)` uses `Target(kind="assertion"|"rule", id=...)`.
+Protected targets cannot be omitted, including a protected submitted candidate.
+Lower integer priority withdraws first; an omitted priority is zero. Within a
+priority, lower confidence withdraws first across both kinds. Exact equal ranks
+produce a deferral, with no ID tie-break, source policy, or confidence aggregation.
+Confidence 1.0 is not implicitly protected. Policy targets must exist in the
+submitted state or candidate.
 
-## Public expression and link interfaces
+The result includes `decision` (`unchanged`, `proposed`, `deferred`), `reason`,
+`binding`, `original`, `initial`, optional `fixed_base`, `trials`, `changes`, and
+optional `final`. `original` always reports the state before the candidate;
+`initial` reports the attempted state including it. Rejecting a candidate does not
+silently certify an inconsistent original state. A verified rejection that keeps
+an already consistent state returns `unchanged` with `candidate_rejected`.
 
-Import solver constructors and AST types from `endoxa.solver`. `BoundVar` is a
-factory; `BoundVarExpr` is its AST class for annotations and `isinstance` checks.
-`MultiPattern` is a factory and `Pattern` its AST class. The other public AST
-types are `Expr`, `Var`, `Const`, `FuncDecl`, `App` and `Quantifier`.
+`Adopt(record)` adds the captured record.
+`Withdraw(target)` only excludes that ID
+from adoption. It never creates a negative claim or sets rule confidence to zero.
+Other owners or remaining rules may still entail the withdrawn claim.
 
-```python
-from endoxa.solver import BoundVar, BoundVarExpr, Function, MultiPattern, Pattern, USort, to_tptp_expr
+The first search scope is zero or one omission from the attempted set. Candidate
+rejection plus withdrawal of another existing record is outside this scope, as are
+multiple withdrawals. Every trial checks the complete remaining input, not only
+core owners. One SAT trial in the earliest viable rank needs all relevant
+comparisons conclusive; two SAT trials in a rank establish a tie. A relevant
+UNKNOWN blocks selection and descent. Search exhaustion is
+`no_verified_single_revision`, not a claim that no repair exists.
 
-item = USort("item")
-x = BoundVar("X", item)
-assert isinstance(x, BoundVarExpr)
-f = Function("label", item, item)
-assert isinstance(MultiPattern(f(x)), Pattern)
-assert to_tptp_expr(f(x)) == "label(X)"
-```
+## Applying safely
 
-`to_tptp_expr` serializes an expression body, including terms. It does not add a
-`fof(name, role, body).` wrapper or choose a FOF role. Serialization behavior is unchanged.
+`propose_revision` returns data; producing or saving a proposal does not change
+adopted membership. Only `decision="proposed"` carries changes to apply. A ledger
+is optional, and confidence calculation remains the caller's responsibility.
 
-`PredicateConstraints.revision_candidates()` enumerates exclusion and implication
-links in deterministic order for possible retraction. Single-valued predicates are excluded from that list
-and continue to participate in recency supersession.
+The immutable `binding` captures `premises`, `policy`, `candidate`, `max_rounds`,
+`max_matches`, and the candidate-inclusive `functional_scope`. Before applying a
+proposal, including one restored from storage, compare the current adopted records
+and membership with `binding.premises`: IDs, atoms or rule formulas, polarity,
+confidence, source, hard axioms, functional predicates, and retained ground scope.
+Compare the policy's protected targets and priorities, the complete candidate,
+and the intended check limits too. Validate the changes against these inputs and
+recheck the complete proposed state with `check_consistency`; require SAT.
 
-## Entailment and independent support
+Preserve and validate `binding.functional_scope` in that state and later checks.
+Do not weaken it or regenerate it from only the remaining Assertions. If restored
+information is missing, input has changed, or the saved proposal uses an older API
+contract, reconstruct complete current inputs and recheck or call
+`propose_revision` again. A restored `final.status="SAT"` is not a certificate
+for the current state.
 
-```python
-from endoxa.governance import Belief, check_entailment, check_belief_support
-from endoxa.solver import Bool
+The consumer must compare its store's state version and apply all changes in the
+same atomic transaction or equivalent conditional update. The binding is neither
+a proof certificate nor a store version; comparing it alone cannot prevent a
+concurrent update between checking and application. endoxa implements no such
+transaction.
 
-p = Bool("p")
-check_entailment([p], p).verdict  # "ENTAILED": premises retain the conclusion
-beliefs = [Belief(truth_value=True, confidence=0.7, id="human(socrates)", atom="human(socrates)", stance="asserted")]
-check_belief_support(beliefs, [], "human(socrates)").verdict  # "NOT_ENTAILED"
-```
+## Storage boundary
 
-Both functions return an `EntailmentResult` with `premises_status` and
-`query_status`. Premises must first be SAT. UNSAT premises produce
-`INCONSISTENT_PREMISES`; UNKNOWN premises produce `UNKNOWN`. Neither proceeds
-to the query, so `query_status` is `None`. Otherwise, the query checks premises
-with the negated conclusion: UNSAT means `ENTAILED`, SAT means `NOT_ENTAILED`,
-and UNKNOWN means `UNKNOWN`. Both budgets apply separately to each check.
+Public records are an in-memory Python API, not a durable storage schema.
+Field access and `dataclasses.replace` are available. Currently,
+`dataclasses.asdict` works for `Assertion`, `Rule`, and `PremiseSet`; those records
+can also be pickled. These conveniences are not a general codec: `RevisionPolicy`
+contains a read-only mapping for `priorities`, so `asdict` and pickle raise
+`TypeError` for it and for a proposal containing it. No long-term storage
+compatibility is promised for dataclass output, pickle, type names, or module paths.
 
-`check_entailment` accepts Boolean `Expr` formulas in propositional logic or
-uninterpreted first-order logic with equality. Bool symbols are propositional
-constants; first-order variables must be quantified over uninterpreted sorts.
-Quantified solving is incomplete. Integer terms, arithmetic, free first-order
-variables and bare patterns are refused.
+Callers own conversion to and from their chosen storage format, schema versions
+and migrations, adoption state, and history. They must retain the inputs and scope
+needed for the application checks above and validate recovered inputs through the
+public constructors. endoxa supplies no general persistence codec for the new API;
+historical formats and their migrations are also caller-owned.
 
-`check_belief_support` accepts a sequence of `Belief`, rule expressions and a
-target ID. It removes all beliefs with the same atom in either polarity,
-including whitespace variants with different IDs. `truth_value=False` queries
-the negated atom; the default queries its positive form regardless of its stored
-truth value. An explicit atom has an independent ID;
-belief atoms are explicit flat ground atom text. Predicates and
-constant arguments start with a lower-case letter. Nested terms and formula
-beliefs are not supported. Missing or duplicate IDs
-are `InvalidArgumentError`; malformed atoms are `RuleSyntaxError`. Invalid
-inputs are errors, not UNKNOWN, and no belief is silently omitted.
+## Measurements and historical data
 
-`endoxa.governance.revision.check_atom_support` checks the positive atom's
-independent support from explicit revision maps, including when it is not held.
-It returns the same four-verdict `EntailmentResult`; inconsistent premises do not
-support a conclusion. This query accepts atom text directly, so the atom need
-not already be held. It always queries the positive form and excludes every
-observation of that atom in either polarity. In contrast, `check_belief_support`
-resolves a held ID and accepts an explicit query polarity. Each map entry needs
-a nonempty string ID and a separate `atom` field; supplied `truth_value` must be
-Boolean and omission means true. Both queries stop after UNSAT or UNKNOWN
-premises, without querying a conclusion.
+`endoxa.instruments.calibration` retains independent Brier, knowledge-transition,
+ask-outcome and windowed measurements. `endoxa.instruments.coverage` retains static
+rule connectivity measurements. Callers provide observations and active inputs;
+measurements do not update confidence or control adoption.
 
-## Checking multiple owners without revision
+Historical atom `retract` recorded a polarity reversal. It must not be converted
+blindly to `Withdraw`, which only ends adoption of an ID. Consumers preserve old
+history through their own schemas, replay and confidence accounting.
+The package contains no historical adjudication or replay engine. Callers needing
+historical comparisons retain their own explicit reference implementation.
+See [examples](examples/README.md).
 
-`check_belief_consistency` accepts distinct belief IDs for the same atom, in
-both polarities. The host submits only currently adopted beliefs; this function
-neither selects them nor changes their records or a ledger.
+## Development
 
-```python
-from endoxa.governance import Belief, check_belief_consistency
+Python 3.14+; install with `uv sync --locked --all-extras`.
+Run `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`,
+`uv run lint-imports`, and `uv run pytest`.
+Optional extras: `trace` for trace records and `coverage` for graph measurements.
 
-beliefs = [
-    Belief(id="report:1", atom="open(door)", truth_value=True, confidence=0.7, stance="asserted"),
-    Belief(id="report:2", atom="open( door )", truth_value=True, confidence=0.5, stance="hypothesis"),
-    Belief(id="report:3", atom="open(door)", truth_value=False, confidence=0.8, stance="asserted"),
-]
-result = check_belief_consistency(beliefs, max_rounds=4, max_matches=32)
-assert result.status == "UNSAT"
-positive = next(item for item in result.core if item.truth_value)
-assert positive.owner_ids == ("report:1", "report:2")
-assert check_belief_consistency(beliefs[1:]).status == "UNSAT"
-```
-
-Each immutable `BeliefAssumption` groups a canonical atom, its Boolean polarity,
-and sorted owner IDs. `BeliefConsistencyResult.assumptions` includes all submitted
-signed groups; `.core` is an assumption subset inconsistent with the fixed
-`hard_axioms`. Hard axioms are closed premise FOF strings accepted by
-`parse_premise_fof`. An empty UNSAT core can mean the axioms already conflict.
-The core need not be minimal or unique: owners supply a premise, rather than
-being individually judged wrong or selected for withdrawal. Results are ordered
-by atom and polarity, with false before true.
-
-SAT and UNKNOWN have empty cores. UNKNOWN is an inconclusive check, not a
-consistency certificate or a detected conflict. Duplicate IDs and invalid inputs
-raise errors. `max_rounds` and `max_matches` accept nonnegative integers or None,
-excluding bool; they bound quantifier work per check, not wall-clock time.
-Stance, confidence and source do not rank owners here. The host retains inactive
-records, provenance and snapshot versions and decides what to do next.
-
-This additive query does not relax `govern` or the revision-map APIs' unique atom
-ownership, and does not change their operation meanings. It proposes no
-withdrawal and draws no conclusion from inconsistent premises.
-
-The input boundary is flat ground `Belief` atoms and closed premise FOF strings,
-not arbitrary solver ASTs. FOF equality compares individual-valued terms:
-`p(a)=p(b)` compares function terms, not the truth values of predicates. The
-grammar rejects Boolean-valued term equality, such as `$true=$false` or
-`(p(a))=(p(b))`, and Boolean arguments such as `p($false)`. `$true` and `$false`
-are still accepted in formula positions. General Boolean equality defects in the
-lower-level `Solver` remain unfixed; this API does not extend that theory.
-Quantified checks inherit the solver's E-matching limitations and are not a
-complete first-order decision procedure. A verdict is not an independently
-checked proof certificate.
-
-An owner set is not an executable withdrawal set. Removing one owner can leave
-the same premise supplied by another, as the example's final assertion shows.
-
-## Explicit identity and recorded metadata
-
-```python
-from endoxa.governance import Belief, LedgerOp, reconstruct_view
-
-belief = Belief(
-    id="belief:17", atom="human( socrates )", truth_value=True, confidence=0.7, stance="hypothesis", source="tool"
-)
-assert belief.id == "belief:17"
-assert belief.atom == "human(socrates)"
-assert Belief.from_record(belief.to_record()) == belief
-
-birth = LedgerOp(
-    op="assert",
-    target=belief.id,
-    truth_value=belief.truth_value,
-    confidence=belief.confidence,
-    actor="observer",
-    atom=belief.atom,
-    stance=belief.stance,
-    source=belief.source,
-)
-restored = reconstruct_view([birth])[belief.id].to_belief()
-assert restored == belief
-```
-
-`Belief` requires keyword-only `id`, `atom`, `truth_value`, `confidence` and
-`stance`. `source` is optional. Atom whitespace is normalized; IDs stay opaque.
-Confidence must be finite and between 0 and 1, and truth values must be Boolean.
-Record codecs require these explicit fields and do not infer missing metadata.
-
-`govern` refuses duplicate IDs, belief/rule ID collisions and multiple IDs for
-one atom, in either polarity. This replaces ambiguous core attribution with an
-error. Revision, link checks, supersession (`escalated`), holds and operations
-use IDs for references and atoms for formulas. Low-level cores remain Exprs,
-paired with an expression-to-ID map. Low-level revision dictionaries require
-`atom` in each row and explicit `stance` where revision preference is used.
-Support queries allow multiple IDs for an atom and exclude every one.
-
-`stance` is `asserted` or `hypothesis`, chosen by the caller independently of
-writer attribution and source. Source kinds are `user`, `tool`, `corpus` and
-`derivation`; omission means unknown, not an inferred origin. Ledger replay keeps
-old records readable with missing metadata. `BeliefState.to_belief()` requires
-recorded atom, stance and confidence before producing a governable belief.
-
-## Strict FOF entry points
-
-```python
-from endoxa.governance import Rule, parse_premise_fof, parse_query_fof
-
-text = "fof(mortality, hypothesis, ![X]: (human(X) => mortal(X)))."
-name, role, expression = parse_premise_fof(text)
-assert (name, role) == ("mortality", "hypothesis")
-rule = Rule.from_fof(text, name="rule:17", confidence=0.9, defeasible=False)
-assert rule.name == "rule:17" and rule.axiom == text
-assert parse_query_fof("fof(question, conjecture, mortal(socrates)).")[:2] == (
-    "question",
-    "conjecture",
-)
-```
-
-Premises and `Rule.from_fof` accept only axiom, hypothesis and assumption;
-queries accept only conjecture. Other roles, multiple statements, open formulas
-and unsupported syntax are refused. Both parsers retain name, role and Expr,
-with the same Boolean/uninterpreted fragment as `check_entailment`. The rule's
-operation ID defaults to the FOF name; an override leaves the original
-annotated text intact. Roles never supply source, stance or defeasibility.
-The `Rule` constructor and governance's hard axioms use the same strict premise
-validation. `Rule.from_fof` additionally reads a default ID from the FOF name.
-The general `parse_fof` parser can read other roles; it does not designate a
-formula as a valid governance premise.
-
-## Upgrading from 0.5.0
-
-Version 0.6.0 uses explicit belief fields and revision-map atoms. Migrate
-callers before using it: `target` and `context`, `Belief.from_atom`, `entails`,
-`acquired_links` and `to_tptp` are removed. Use `Belief`, consistency-guarded
-support queries, `revision_candidates` and `to_tptp_expr` respectively.
-
-Historic ledger rows still replay without inventing atom, stance or source.
-This data-reading contract is separate from constructing new API records.
-
-## Install
-
-**Requires Python 3.14 or newer.** That floor is real rather than cautious: the
-package is written in 3.14 syntax and will not parse on an older interpreter. If
-`pip` declines to install this, that is why.
-
-```bash
-pip install endoxa
-```
-
-The core takes one dependency. Two packages need more and are opt-in:
-
-```bash
-pip install "endoxa[trace]"     # the ordered series of an agent's propositions
-pip install "endoxa[coverage]"  # how densely rules connect predicates
-```
-
-## What this is not
-
-- **Not a reasoner.** endoxa does not decide whether a claim is true. You hand it
-  beliefs and the rules they live under, and it answers whether they can hold
-  together and what to give up when they cannot. Where the beliefs came from is
-  your side of the line — it makes no model calls and reads no context.
-- **Not a knowledge base.** The ledger is the record of one agent's beliefs over
-  a run: small enough to fold in memory, ordered because the order is what makes
-  it a history. There is no query language and no index, and where storage
-  appears at all it is a Protocol for you to implement — no backend ships here.
-  To ask what the world contains, this is the wrong shape; to ask what this agent
-  committed to and when it stopped, it is the right one.
-- **Not a general-purpose SMT solver.** The bundled one answers a single question
-  on the fragment that question needs. Z3 is faster, more complete, and decides
-  theories this has never heard of — arithmetic, arrays, bitvectors — and if
-  solving is the job you have, that is the tool for it. This one is here because
-  it arrives with `pip`, and because its verdicts land in the same ledger as
-  everything else.
-- **Not a new idea.** Truth maintenance is Doyle, 1979; the assumption-based
-  version is de Kleer, 1986; defeasible reasoning has decades behind it, and the
-  hard questions were asked long before this was written. What is here is that
-  machinery given a ledger, calibration instruments, and a surface an agent loop
-  can call. If you know TMS, you already know the middle of this.
-- **Not measured against the alternative.** There is no benchmark here, and no
-  claim that an agent using this is more consistent, better calibrated, or more
-  anything than one that is not. That would take an experiment, and there is not
-  one to point at. What *is* checked is narrower and duller: that the solver
-  agrees with Z3 where both are complete, that the ledger folds to the view it
-  reports, that the examples do what they say. Those live in the test suite, and
-  they are the claims this makes.
-
-## Design notes
-
-- **The solver is bundled and frozen.** endoxa answers about consistency without
-  reaching for an external prover. Its verdicts are checked against Z3's over
-  generated formulas in two fragments — propositional, and equality with
-  uninterpreted functions — chosen because both solvers are *complete* on them, so
-  a disagreement is a bug rather than an artefact of one giving up first.
-  Quantifier instantiation sits outside that on purpose: it is anytime, and
-  answers `UNKNOWN` when its budget runs out, which is a correct answer and not
-  one a verdict comparison can score. That part has ordinary tests instead. The
-  differential needs Z3, which is a dev dependency and is not shipped.
-- **The ledger is the record, not a cache.** Operations are appended; the current
-  view is folded from them. An unsettleable conflict appears in that view as
-  `UNRESOLVED` rather than as a silent choice.
-- **Instruments are imported by nothing else.** A measure its subject can reach
-  is a measure its subject can move, so the dependency is forbidden by contract
-  and checked in CI.
-- **One name catches everything this raises.** `endoxa.errors.EndoxaError` is the
-  base of every error the library raises on its own behalf, and no dependency's
-  exceptions reach past the boundary — a malformed rule is a `RuleSyntaxError`,
-  not the grammar library's business. Each class is also the built-in you would
-  have reached for anyway, so `except ValueError` keeps working.
-- **Requires Python 3.14+.**
-
-## Issues
-
-Issues are open and they are read. What is not offered is a response time: this
-is one person's pre-alpha library, so a report may sit for a while and a pull
-request may sit longer. Filing one is still the best way to move something up
-the list — what is reported is what gets looked at first.
-
-Security reports go through [private advisories](https://github.com/noise01/endoxa/security/advisories/new)
-rather than public issues. See [SECURITY.md](SECURITY.md).
-
-## License
-
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Licensed under Apache-2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE).

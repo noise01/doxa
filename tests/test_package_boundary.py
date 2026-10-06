@@ -436,15 +436,15 @@ class TestCrossReferences:
     def test_a_planted_dangling_reference_is_caught(self):
         """Both real ones the extraction left behind: a host class, and a host module."""
         symbols = _module_symbols()
-        package = "endoxa.governance.revision"
+        package = "endoxa.governance"
         assert not _resolves("EventStore.get_by_types", package=package, symbols=symbols)
         assert not _resolves(".memory._build_exclusion_links", package=package, symbols=symbols)
 
     def test_a_relative_reference_resolves_against_its_own_package(self):
         symbols = _module_symbols()
-        package = "endoxa.governance.revision"
-        assert _resolves(".preference", package=package, symbols=symbols)
-        assert _resolves(".engine.select_verified_revision_target", package=package, symbols=symbols)
+        package = "endoxa.governance"
+        assert _resolves(".premises", package=package, symbols=symbols)
+        assert _resolves(".checks.check_consistency", package=package, symbols=symbols)
         assert not _resolves(".propagation.propagate", package=package, symbols=symbols)
 
 
