@@ -3,7 +3,7 @@
 A caller who wants to handle a bad rule string has to be able to name the thing
 that gets raised. Before this module the answer was ``lark.exceptions.UnexpectedToken``:
 the grammar library reached through :func:`~endoxa.solver.parse_fof` and out of
-:func:`~endoxa.governance.govern`, so handling a typo in an axiom meant importing
+:func:`~endoxa.governance.check_consistency`, so handling a typo in an axiom meant importing
 a dependency this package documents as an internal detail, and pinning a
 behaviour it reserves the right to change.
 

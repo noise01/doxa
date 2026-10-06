@@ -7,8 +7,9 @@ counting how the classifications fared is this.
 """
 
 from dataclasses import dataclass
+from typing import Literal
 
-from endoxa.governance.knowledge import EpistemicStatus
+EpistemicStatus = Literal["known", "uncertain", "unknown"]
 
 
 @dataclass(slots=True, frozen=True)

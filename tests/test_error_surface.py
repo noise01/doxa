@@ -18,7 +18,7 @@ import pytest
 
 import endoxa.errors
 from endoxa.errors import EndoxaError, RuleSyntaxError
-from endoxa.governance import Belief, Constraints, Rule, govern
+from endoxa.governance import PremiseSet, check_consistency
 from endoxa.solver import parse_fof
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,20 +76,9 @@ class TestTheParserDoesNotReachThrough:
         assert "fof" in str(caught.value)
 
     def test_it_arrives_through_the_governance_entry_point_too(self):
-        """``govern`` parses the rules it is handed, so the boundary has to hold there."""
+        """The current public premise query reports grammar errors through EndoxaError."""
         with pytest.raises(EndoxaError):
-            govern(
-                beliefs=[
-                    Belief(
-                        truth_value=True,
-                        confidence=1.0,
-                        id="human(socrates)",
-                        atom="human(socrates)",
-                        stance="asserted",
-                    )
-                ],
-                constraints=Constraints(rules=(Rule(name="r", axiom="not a formula", confidence=0.9),)),
-            )
+            check_consistency(PremiseSet(hard_axioms=("not a formula",)))
 
     def test_the_parser_diagnosis_is_kept_as_the_cause(self):
         """Wrapped, not swallowed: the line and column are still reachable."""

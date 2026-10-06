@@ -21,27 +21,29 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 #: Each example, with the lines its own prose commits it to. Substrings rather
 #: than whole output: what is pinned is the claim, not the layout.
 CLAIMS: dict[str, tuple[str, ...]] = {
-    "04_direct_ledger.py": ("operations: 2", "atom: door_closed(room)", "source: tool"),
+    "06_revision_proposals.py": (
+        "decision: proposed",
+        "withdraw: negative",
+        "original negative polarity: False",
+        "positive still entailed: ENTAILED",
+    ),
+    "04_check_support.py": ("independent support: ENTAILED", "source: tool"),
     "05_public_solver_interfaces.py": (
         "expression body: label(X)",
-        "revision candidates: 1",
         "bound-variable type: True",
         "pattern type: True",
     ),
     "01_a_contradiction_is_caught.py": (
-        "consistent: False",
-        # The weaker claim gives way, and the rule and the user's assertion do not.
-        "retract",
-        "mortal(socrates)",
-        "human(socrates)",
+        "consistency: UNSAT",
+        "decision: proposed",
+        "withdraw: mortal",
+        "original polarity: False",
+        "verified final: SAT",
     ),
     "02_a_tie_is_not_a_coin_flip.py": (
-        # Both sides carry the hold, and neither is withdrawn.
-        "status=UNRESOLVED",
-        "held_with=outdoors(cat)",
-        "held_with=indoors(cat)",
-        # The answer ends it, and the end has an author.
-        "released_by=ask-17",
+        "decision: deferred",
+        "changes: 0",
+        "original claims: 2",
     ),
     "03_what_the_instruments_say.py": (
         # The prose says a single score cannot tell "is" from "was"; these are

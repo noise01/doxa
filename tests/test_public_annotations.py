@@ -27,11 +27,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _packages_declaring_exports() -> list[str]:
-    """Every package under ``endoxa`` with an ``__all__``, dotted."""
+    """Public packages, excluding internal packages."""
     root = ROOT / "src" / "endoxa"
     found = []
     for path in sorted(root.rglob("__init__.py")):
         relative = path.parent.relative_to(root).as_posix()
+        if any(part.startswith("_") for part in path.parent.relative_to(root).parts):
+            continue
         dotted = "endoxa" if relative == "." else f"endoxa.{relative.replace('/', '.')}"
         if getattr(importlib.import_module(dotted), "__all__", None):
             found.append(dotted)

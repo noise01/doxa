@@ -9,7 +9,7 @@ Pure and dependency-free -- stdlib only, importing nothing else in endoxa -- so 
 sits below everything.
 
 **Two narrower parsers remain elsewhere, deliberately.**
-:mod:`endoxa.governance.revision.facts` and :mod:`endoxa.governance.revision.engine`
+:mod:`endoxa.governance.checks`
 each read atoms with a stricter pattern: theirs tolerates no whitespace around
 the parenthesis and drops empty terms, so ``p (a)`` and ``p(a,,b)`` mean
 something to them that they do not mean here. Folding those in would *widen* the
