@@ -16,9 +16,9 @@ python examples/06_revision_proposals.py
 | [`05_public_solver_interfaces.py`](05_public_solver_interfaces.py) | Expression bodies and public AST types. |
 | [`06_revision_proposals.py`](06_revision_proposals.py) | One withdrawn ID does not erase other owners or reverse its original polarity. |
 
-Examples 01, 02, 04 and 06 use the unreleased public premise API. Example 05
-uses the public solver constructors. Callers own history, confidence updates
-and application.
+Examples 01, 02, 04 and 06 use the public premise API introduced in 0.8.0.
+Example 05 uses the public solver constructors. Callers own history, confidence
+updates and application.
 
 The streams in them are scripted. Nothing here measures an agent — the examples
 show what the library reports, which is not the same as showing that reporting

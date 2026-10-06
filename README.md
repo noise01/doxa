@@ -3,9 +3,9 @@
 **Consistency checks, verified revision proposals, and independent measurements.**
 Callers own adopted membership, confidence updates, history, storage, and application.
 
-> **Status: pre-alpha.** This unreleased API replaces the 0.7.0 governance facade.
-> It is not available in the published 0.7.0 package.
-> Review the changelog before upgrading.
+> **Status: pre-alpha.** Version 0.8.0 replaces the 0.7.0 governance API.
+> This minor release includes breaking changes. Review the
+> [migration notes](https://github.com/noise01/endoxa/blob/v0.8.0/CHANGELOG.md#080) before upgrading.
 
 ## Import boundaries
 

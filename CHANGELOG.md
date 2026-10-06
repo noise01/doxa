@@ -6,6 +6,38 @@ not a promise.
 
 ## [Unreleased]
 
+## [0.8.0]
+
+This pre-1.0 minor release contains breaking governance API changes. The former
+entry points and ledger exports are removed without compatibility aliases.
+Migrate callers before upgrading; historical storage formats remain caller-owned.
+
+### Migration
+
+- Replace `Belief` with keyword-only `Assertion(id, atom, truth_value, confidence,
+  source=None)`. There is no stance field. Keep independent record IDs, including
+  different owners of the same signed atom; changing claim content needs a new ID.
+- Replace `Rule(name, axiom, confidence)` with keyword-only
+  `Rule(id, formula, confidence)`, and `Constraints` with `PremiseSet`.
+  Submit closed premise FOF for rules and hard axioms. Retain `functional_scope`
+  across withdrawals, candidates and subsequent checks.
+- Replace `govern` with explicit checks and `propose_revision`. Handle `status`
+  and proposal `decision` rather than old `.consistent` and `.ops` fields.
+  `check_entailment` now takes a PremiseSet and closed FOF conjecture text;
+  `check_support` takes an atom and polarity and excludes all owners of that atom.
+- Supply `RevisionPolicy` explicitly for protection and priorities. Confidence
+  1.0 does not automatically protect a target. Equal-ranked verified repairs and
+  inconclusive comparisons defer without applying a change.
+- Treat `Withdraw` as the end of that ID's adoption, never as a negative claim,
+  a polarity reversal or zero rule confidence. Other owners and rules can still
+  entail the same claim. Callers calculate confidence and validate the full
+  binding and current store version before an atomic application.
+- Move ledger schema, audit-event conversion, replay, comparison and evidence
+  reasons into the caller's accounting implementation. Preserve historical
+  retract polarity/evidence behavior and recorded provenance; do not translate
+  old retract rows directly into Withdraw or infer missing birth metadata.
+  No database migration, replay engine or durable record codec is supplied.
+
 ### Changed
 
 - Define native `Assumption`, `ConsistencyResult`, and `EntailmentResult` types
@@ -589,7 +621,8 @@ exists to get right has never once been taken outside a test.
 belief's footing and "was never exercised". It records nothing, and it is
 tested. The gap is the one stated above. See the 0.1.0 entry.)*
 
-[Unreleased]: https://github.com/noise01/endoxa/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/noise01/endoxa/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/noise01/endoxa/compare/v0.7.0...v0.8.0
 [0.5.0]: https://github.com/noise01/endoxa/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/noise01/endoxa/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/noise01/endoxa/compare/v0.2.1...v0.3.0
