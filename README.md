@@ -3,13 +3,13 @@
 **Consistency checks, verified revision proposals, and independent measurements.**
 Callers own adopted membership, confidence updates, history, storage, and application.
 
-> **Status: pre-alpha.** Version 0.8.0 replaces the 0.7.0 governance API.
+> **Status: pre-alpha.** Version 0.9.0 adds bounded multiple withdrawals and
+> a finite proposal-wide check budget, and changes revision trial and binding types.
 > This minor release includes breaking changes. Review the
-> [migration notes](https://github.com/noise01/endoxa/blob/v0.8.0/CHANGELOG.md#080) before upgrading.
+> [0.9.0 migration notes](https://github.com/noise01/endoxa/blob/v0.9.0/CHANGELOG.md#090) before upgrading.
 >
-> **Unreleased:** the bounded multiple-withdrawal search and total-check controls
-> below are development changes. Published 0.8.0 has single-omission trials and
-> no total-check budget; see its [tagged README](https://github.com/noise01/endoxa/blob/v0.8.0/README.md).
+> Callers upgrading from 0.7.0 or earlier also need the
+> [0.8.0 migration notes](https://github.com/noise01/endoxa/blob/v0.8.0/CHANGELOG.md#080).
 
 ## Import boundaries
 

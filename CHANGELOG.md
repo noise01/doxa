@@ -6,6 +6,28 @@ not a promise.
 
 ## [Unreleased]
 
+## [0.9.0]
+
+This pre-1.0 minor release changes the public revision trial and binding types.
+Migrate callers before upgrading from 0.8.0.
+
+### Migration
+
+- Read `RevisionTrial.omitted` as a nonempty tuple of distinct typed targets,
+  even for a single omission. Iterate over the tuple instead of accessing one
+  target directly.
+- Preserve and validate `RevisionBinding.max_withdrawals` and `max_checks` along
+  with the complete inputs and solver limits. Regenerate proposals whose saved
+  binding lacks these controls from complete current inputs before application;
+  a stored SAT result does not establish that they are current.
+- Handle the finite proposal-wide budget, including with the default
+  `max_withdrawals=1`. The default `max_checks=256` can defer a larger search with
+  `check_budget_exhausted`; this is distinct from solver UNKNOWN. Choose an
+  explicit larger finite budget when needed. Do not apply a partial search.
+- Multiple existing withdrawals require an explicit `max_withdrawals` above one.
+  Apply all proposed changes atomically only after validating the full binding
+  and rechecking the complete remaining state. Application remains caller-owned.
+
 ### Added
 
 - Opt-in bounded multiple withdrawals through `propose_revision(max_withdrawals=...)`.
