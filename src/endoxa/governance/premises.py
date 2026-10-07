@@ -121,9 +121,11 @@ class PremiseSet:
 class RevisionPolicy:
     """Protected targets cannot withdraw; lower integer priority withdraws first.
 
-    Missing priorities are zero. Within a priority, lower confidence withdraws
-    first, equally for assertions and rules. Equal values defer; IDs never break
-    ties. Confidence 1.0 is eligible unless explicitly protected.
+    Missing priorities are zero. For sets, minimize withdrawal counts from the
+    largest priority down before comparing descending confidence vectors within
+    those same layers. Smaller vectors win, equally for assertions and rules.
+    Equal ranks defer; IDs never break ties. Confidence 1.0 is eligible unless
+    explicitly protected.
     """
 
     protected: frozenset[Target] = frozenset()

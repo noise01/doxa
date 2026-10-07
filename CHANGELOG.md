@@ -6,6 +6,52 @@ not a promise.
 
 ## [Unreleased]
 
+## [0.9.0]
+
+This pre-1.0 minor release changes the public revision trial and binding types.
+Migrate callers before upgrading from 0.8.0.
+
+### Migration
+
+- Read `RevisionTrial.omitted` as a nonempty tuple of distinct typed targets,
+  even for a single omission. Iterate over the tuple instead of accessing one
+  target directly.
+- Preserve and validate `RevisionBinding.max_withdrawals` and `max_checks` along
+  with the complete inputs and solver limits. Regenerate proposals whose saved
+  binding lacks these controls from complete current inputs before application;
+  a stored SAT result does not establish that they are current.
+- Handle the finite proposal-wide budget, including with the default
+  `max_withdrawals=1`. The default `max_checks=256` can defer a larger search with
+  `check_budget_exhausted`; this is distinct from solver UNKNOWN. Choose an
+  explicit larger finite budget when needed. Do not apply a partial search.
+- Multiple existing withdrawals require an explicit `max_withdrawals` above one.
+  Apply all proposed changes atomically only after validating the full binding
+  and rechecking the complete remaining state. Application remains caller-owned.
+
+### Added
+
+- Opt-in bounded multiple withdrawals through `propose_revision(max_withdrawals=...)`.
+  Preserve the default of one existing withdrawal and standalone candidate
+  rejection; candidate rejection plus an existing repair remains excluded.
+  Lazily enumerate complete-input trials without materializing combinations.
+- A finite proposal-wide `max_checks` budget, defaulting to 256 and requiring at
+  least two. Count original, attempted, fixed-base and trial consistency calls;
+  reused verdicts cost no extra check. Report `checks_used` and distinguish
+  `check_budget_exhausted` from solver UNKNOWN. Per-check limits are unchanged.
+
+### Changed
+
+- Rank withdrawal sets by descending-priority-layer count vectors, then by
+  descending confidence vectors within those layers. Prioritize preserving more
+  important records over total withdrawal count, without adding confidences or
+  breaking ties by ID. Propose only a unique verified best within the configured
+  scope; unresolved better or same-ranked comparisons defer.
+- Capture withdrawal scope and total-check budget in `RevisionBinding`.
+  `RevisionTrial.omitted` is now a nonempty tuple of distinct typed targets,
+  including for single omissions. Callers reading that field must handle tuples.
+  Larger exhausted scopes return `no_verified_revision`; the default retains
+  `no_verified_single_revision`. Adoption, storage and confidence remain caller-owned.
+
 ## [0.8.0]
 
 This pre-1.0 minor release contains breaking governance API changes. The former
