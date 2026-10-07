@@ -21,6 +21,15 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 #: Each example, with the lines its own prose commits it to. Substrings rather
 #: than whole output: what is pinned is the claim, not the layout.
 CLAIMS: dict[str, tuple[str, ...]] = {
+    "07_bounded_revisions.py": (
+        "single-withdrawal scope: no_verified_single_revision",
+        "decision: proposed",
+        "withdraw: p-negative, q-negative",
+        "withdrawal limit: 2",
+        "checks used: 7",
+        "short budget: check_budget_exhausted",
+        "original records: 4",
+    ),
     "06_revision_proposals.py": (
         "decision: proposed",
         "withdraw: negative",

@@ -1,10 +1,10 @@
 """Snapshot-bound, verified proposals; no application, storage or credence arithmetic."""
 
 from dataclasses import dataclass, replace
-from itertools import groupby
 from typing import Literal
 
 from endoxa.errors import InvalidArgumentError
+from endoxa.governance._revision_search import ordered_omissions
 from endoxa.governance.checks import check_consistency, validate_limits
 from endoxa.governance.premises import Assertion, PremiseSet, RevisionPolicy, Rule, Target, target_of
 from endoxa.governance.results import ConsistencyResult
@@ -22,6 +22,8 @@ RevisionReason = Literal[
     "trial_unknown",
     "no_eligible_target",
     "no_verified_single_revision",
+    "no_verified_revision",
+    "check_budget_exhausted",
 ]
 
 
@@ -53,7 +55,7 @@ class Withdraw:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RevisionBinding:
-    """Exact immutable inputs, including all policy values and per-check limits.
+    """Exact immutable inputs, including policy, withdrawal scope and both budgets.
 
     Consumers compare their current records, membership, constraints and policy,
     recheck the proposed state, then apply atomically with their own state version.
@@ -61,6 +63,8 @@ class RevisionBinding:
     functional_scope captures the candidate-inclusive checking vocabulary,
     separately from the original adopted premises. Every check retains its
     exclusions even when an Assertion or Rule withdraws.
+    max_withdrawals bounds existing-target sets; max_checks caps all consistency
+    calls for this proposal. Neither bound certifies unlimited search optimality.
     """
 
     premises: PremiseSet
@@ -69,18 +73,32 @@ class RevisionBinding:
     max_rounds: int | None
     max_matches: int | None
     functional_scope: frozenset[str]
+    max_withdrawals: int = 1
+    max_checks: int = 256
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RevisionTrial:
-    """Check after omitting one target from the attempted adopted set.
+    """Check after omitting a nonempty set of targets from the attempted set.
 
     Omitting the not-yet-adopted candidate means rejection. Its result is the
     original state's verdict, which can still be UNSAT or UNKNOWN.
+    Candidate rejection never shares a trial with existing-target withdrawals.
     """
 
-    omitted: Target
+    omitted: tuple[Target, ...]
     result: ConsistencyResult
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.omitted, (tuple, list))
+            or not self.omitted
+            or any(not isinstance(target, Target) for target in self.omitted)
+            or len(set(self.omitted)) != len(self.omitted)
+        ):
+            msg = "RevisionTrial omitted requires nonempty distinct typed targets"
+            raise InvalidArgumentError(msg)
+        object.__setattr__(self, "omitted", tuple(sorted(self.omitted, key=lambda target: (target.kind, target.id))))
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -96,6 +114,7 @@ class RevisionResult:
     trials: tuple[RevisionTrial, ...] = ()
     changes: tuple[Adopt | Withdraw, ...] = ()
     final: ConsistencyResult | None = None
+    checks_used: int = 0
 
 
 def _with_candidate(premises: PremiseSet, candidate: Assertion | Rule | None) -> PremiseSet:
@@ -111,10 +130,11 @@ def _with_candidate(premises: PremiseSet, candidate: Assertion | Rule | None) ->
     )
 
 
-def _without(premises: PremiseSet, target: Target) -> PremiseSet:
+def _without(premises: PremiseSet, targets: tuple[Target, ...]) -> PremiseSet:
+    omitted = frozenset(targets)
     return PremiseSet(
-        assertions=tuple(record for record in premises.assertions if target_of(record) != target),
-        rules=tuple(record for record in premises.rules if target_of(record) != target),
+        assertions=tuple(record for record in premises.assertions if target_of(record) not in omitted),
+        rules=tuple(record for record in premises.rules if target_of(record) not in omitted),
         hard_axioms=premises.hard_axioms,
         functional_predicates=premises.functional_predicates,
         functional_scope=premises.functional_scope,
@@ -124,27 +144,54 @@ def _without(premises: PremiseSet, target: Target) -> PremiseSet:
 DEFAULT_POLICY = RevisionPolicy()
 
 
-def propose_revision(
+@dataclass(slots=True)
+class _Checks:
+    binding: RevisionBinding
+    used: int = 0
+
+    def check(self, premises: PremiseSet) -> ConsistencyResult | None:
+        if self.used >= self.binding.max_checks:
+            return None
+        self.used += 1
+        return check_consistency(premises, max_rounds=self.binding.max_rounds, max_matches=self.binding.max_matches)
+
+
+def _validate_search_limits(max_withdrawals: int, max_checks: int) -> None:
+    for name, value, minimum in (("max_withdrawals", max_withdrawals, 1), ("max_checks", max_checks, 2)):
+        if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+            msg = f"{name} must be an integer at least {minimum}"
+            raise InvalidArgumentError(msg)
+
+
+def propose_revision(  # noqa: PLR0913 - independent solver, scope and total-check limits are public controls
     premises: PremiseSet,
     policy: RevisionPolicy = DEFAULT_POLICY,
     *,
     candidate: Assertion | Rule | None = None,
     max_rounds: int | None = None,
     max_matches: int | None = None,
+    max_withdrawals: int = 1,
+    max_checks: int = 256,
 ) -> RevisionResult:
-    """Search zero or one omission, considering candidate rejection without novelty bias.
+    """Verify a unique best revision within the configured withdrawal scope.
 
     Every trial checks the entire attempted set, never merely the initial core.
-    Protected targets are excluded. Lower priority, then lower confidence ranks
-    first across both kinds; an exact same-rank tie defers. UNKNOWN in a relevant
-    rank blocks choice and descent. Two SAT trials already establish nonuniqueness.
+    Protected targets are excluded. Minimize withdrawal counts from the highest
+    numeric priority layer down; only equal count vectors compare descending
+    confidences within those layers. An exact same-rank tie defers. A relevant
+    UNKNOWN or exhausted check budget blocks selection and descent.
     Exhaustion means no repair in this search scope, not logical irreparability.
-    Candidate rejection plus an existing withdrawal is outside the initial scope.
-    Limits renew per check and do not impose an aggregate or wall-clock budget.
+    Candidate rejection is a separate single omission and never combines with
+    existing withdrawals. max_checks counts all consistency calls, including
+    original, attempted and fixed-base checks. Reused verdicts cost no new check.
+    max_withdrawals must be at least one and max_checks at least two, reserving
+    the original and attempted diagnostics without inventing unchecked verdicts.
+    It is not a wall-clock bound; max_rounds/max_matches still renew per check.
     Functional exclusion uses the candidate-inclusive ground scope throughout,
     including original and rejection checks; withdrawal never shrinks its clauses.
     """
     validate_limits(max_rounds, max_matches)
+    _validate_search_limits(max_withdrawals, max_checks)
     if not isinstance(premises, PremiseSet) or not isinstance(policy, RevisionPolicy):
         msg = "Expected PremiseSet and RevisionPolicy"
         raise InvalidArgumentError(msg)
@@ -161,13 +208,17 @@ def propose_revision(
         max_rounds=max_rounds,
         max_matches=max_matches,
         functional_scope=attempted.functional_scope,
+        max_withdrawals=max_withdrawals,
+        max_checks=max_checks,
     )
-
-    def check(state: PremiseSet) -> ConsistencyResult:
-        return check_consistency(state, max_rounds=max_rounds, max_matches=max_matches)
-
-    original = check(replace(premises, functional_scope=binding.functional_scope))
-    initial = original if candidate is None else check(attempted)
+    # The minimum total budget reserves both mandatory initial diagnostics.
+    original = check_consistency(
+        replace(premises, functional_scope=binding.functional_scope), max_rounds=max_rounds, max_matches=max_matches
+    )
+    initial = (
+        original if candidate is None else check_consistency(attempted, max_rounds=max_rounds, max_matches=max_matches)
+    )
+    checks = _Checks(binding, used=1 if candidate is None else 2)
 
     def result(
         decision: RevisionDecision,
@@ -183,6 +234,7 @@ def propose_revision(
             initial=initial,
             changes=changes,
             final=final,
+            checks_used=checks.used,
         )
 
     if initial.status == "SAT":
@@ -191,13 +243,15 @@ def propose_revision(
         return result("proposed", "candidate_consistent", (Adopt(record=candidate),), initial)
     if initial.status == "UNKNOWN":
         return result("deferred", "initial_unknown")
-    fixed = check(
+    fixed = checks.check(
         PremiseSet(
             hard_axioms=premises.hard_axioms,
             functional_predicates=premises.functional_predicates,
             functional_scope=binding.functional_scope,
         )
     )
+    if fixed is None:
+        return result("deferred", "check_budget_exhausted")
     if fixed.status != "SAT":
         return RevisionResult(
             decision="deferred",
@@ -206,20 +260,21 @@ def propose_revision(
             original=original,
             initial=initial,
             fixed_base=fixed,
+            checks_used=checks.used,
         )
-    return _search(binding, original, initial, fixed, attempted)
+    return _search(checks, original, initial, fixed, attempted)
 
 
 def _search(
-    binding: RevisionBinding,
+    checks: _Checks,
     original: ConsistencyResult,
     initial: ConsistencyResult,
     fixed: ConsistencyResult,
     attempted: PremiseSet,
 ) -> RevisionResult:
+    binding = checks.binding
     policy, candidate = binding.policy, binding.candidate
-    records: list[Assertion | Rule] = [*attempted.assertions, *attempted.rules]
-    eligible = [record for record in records if target_of(record) not in policy.protected]
+    records: tuple[Assertion | Rule, ...] = (*binding.premises.assertions, *binding.premises.rules)
     trials: list[RevisionTrial] = []
 
     def result(
@@ -238,50 +293,51 @@ def _search(
             trials=tuple(trials),
             changes=changes,
             final=final,
+            checks_used=checks.used,
         )
 
-    if not eligible:
+    attempted_records: tuple[Assertion | Rule, ...] = (*attempted.assertions, *attempted.rules)
+    if all(target_of(record) in policy.protected for record in attempted_records):
         return result("deferred", "no_eligible_target")
 
-    def rank(record: Assertion | Rule) -> tuple[int, float]:
-        return policy.priorities.get(target_of(record), 0), record.confidence
-
-    # Sorting only enumerates a rank; all trials in it are compared before selection.
-    for _, band in groupby(sorted(eligible, key=rank), key=rank):
-        band_trials = []
-        for record in band:
-            target = target_of(record)
-            verdict = (
-                original
-                if record == candidate
-                else check_consistency(
-                    _without(attempted, target), max_rounds=binding.max_rounds, max_matches=binding.max_matches
-                )
-            )
-            trial = RevisionTrial(omitted=target, result=verdict)
-            trials.append(trial)
-            band_trials.append(trial)
-        verified = [trial for trial in band_trials if trial.result.status == "SAT"]
-        deferred = _rank_deferral(band_trials)
-        if deferred is not None:
-            return result("deferred", deferred)
-        if verified:
-            chosen = verified[0]
-            if candidate is not None and chosen.omitted == target_of(candidate):
-                return result("unchanged", "candidate_rejected", final=chosen.result)
-            changes: tuple[Adopt | Withdraw, ...] = (Withdraw(target=chosen.omitted),)
-            if candidate is not None:
-                changes = (*changes, Adopt(record=candidate))
-            return result("proposed", "unique_verified_revision", changes, chosen.result)
-    return result("deferred", "no_verified_single_revision")
+    chosen: RevisionTrial | None = None
+    chosen_rank = None
+    for rank, omitted in ordered_omissions(records, policy, candidate, binding.max_withdrawals):
+        if chosen is not None and rank != chosen_rank:
+            break
+        verdict = (
+            original
+            if candidate is not None and omitted == (target_of(candidate),)
+            else checks.check(_without(attempted, omitted))
+        )
+        if verdict is None:
+            return result("deferred", "check_budget_exhausted")
+        trial = RevisionTrial(omitted=omitted, result=verdict)
+        trials.append(trial)
+        if verdict.status == "UNKNOWN":
+            return result("deferred", "trial_unknown")
+        if verdict.status == "SAT":
+            if chosen is not None:
+                return result("deferred", "same_rank_tie")
+            chosen, chosen_rank = trial, rank
+    if chosen is None:
+        reason: RevisionReason = (
+            "no_verified_single_revision" if binding.max_withdrawals == 1 else "no_verified_revision"
+        )
+        return result("deferred", reason)
+    decision, reason, changes = _selected_changes(chosen, candidate)
+    return result(decision, reason, changes, chosen.result)
 
 
-def _rank_deferral(trials: list[RevisionTrial]) -> RevisionReason | None:
-    if sum(trial.result.status == "SAT" for trial in trials) > 1:
-        return "same_rank_tie"
-    if any(trial.result.status == "UNKNOWN" for trial in trials):
-        return "trial_unknown"
-    return None
+def _selected_changes(
+    chosen: RevisionTrial, candidate: Assertion | Rule | None
+) -> tuple[RevisionDecision, RevisionReason, tuple[Adopt | Withdraw, ...]]:
+    if candidate is not None and chosen.omitted == (target_of(candidate),):
+        return "unchanged", "candidate_rejected", ()
+    changes: tuple[Adopt | Withdraw, ...] = tuple(Withdraw(target=target) for target in chosen.omitted)
+    if candidate is not None:
+        changes = (*changes, Adopt(record=candidate))
+    return "proposed", "unique_verified_revision", changes
 
 
 __all__ = [

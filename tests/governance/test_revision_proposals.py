@@ -116,7 +116,7 @@ def test_rejecting_candidate_does_not_certify_inconsistent_original():
     state = PremiseSet(assertions=(claim("a"), claim("b", truth=False)))
     candidate = claim("candidate", atom="q(a)", confidence=0.01)
     result = propose_revision(state, candidate=candidate)
-    rejected_trial = next(trial for trial in result.trials if trial.omitted == target_of(candidate))
+    rejected_trial = next(trial for trial in result.trials if trial.omitted == (target_of(candidate),))
     assert result.original.status == rejected_trial.result.status == "UNSAT"
     assert result.reason == "same_rank_tie"
 
@@ -164,7 +164,7 @@ def test_functional_withdrawal_cannot_hide_a_rule_derived_value():
     state = PremiseSet(assertions=(old, new), rules=(rule,), functional_predicates={"location"})
     result = propose_revision(state)
     assert result.initial.status == "UNSAT"
-    assert result.trials[0].omitted == target_of(new)
+    assert result.trials[0].omitted == (target_of(new),)
     assert result.trials[0].result.status == "UNSAT"
     assert result.changes == (Withdraw(target=target_of(old)),)
     assert result.final.status == "SAT"
@@ -193,7 +193,7 @@ def test_functional_candidate_rejection_uses_candidate_inclusive_scope():
     state = PremiseSet(assertions=(old,), rules=(rule,), functional_predicates={"location"})
     result = propose_revision(state, candidate=candidate)
     assert result.original.status == "UNSAT"
-    assert result.trials[0].omitted == target_of(candidate)
+    assert result.trials[0].omitted == (target_of(candidate),)
     assert result.trials[0].result.status == "UNSAT"
     assert result.changes == (Withdraw(target=target_of(old)), Adopt(record=candidate))
     assert result.final.status == "SAT"
@@ -235,7 +235,7 @@ def test_candidate_rejection_retains_unknown_original_verdict():
     result = propose_revision(state, candidate=candidate, max_rounds=2)
     assert result.original.status == "UNKNOWN"
     assert result.initial.status == "UNSAT"
-    assert result.trials[0].omitted == target_of(candidate)
+    assert result.trials[0].omitted == (target_of(candidate),)
     assert result.trials[0].result.status == "UNKNOWN"
     assert result.reason == "trial_unknown"
     assert result.changes == ()

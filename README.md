@@ -6,6 +6,10 @@ Callers own adopted membership, confidence updates, history, storage, and applic
 > **Status: pre-alpha.** Version 0.8.0 replaces the 0.7.0 governance API.
 > This minor release includes breaking changes. Review the
 > [migration notes](https://github.com/noise01/endoxa/blob/v0.8.0/CHANGELOG.md#080) before upgrading.
+>
+> **Unreleased:** the bounded multiple-withdrawal search and total-check controls
+> below are development changes. Published 0.8.0 has single-omission trials and
+> no total-check budget; see its [tagged README](https://github.com/noise01/endoxa/blob/v0.8.0/README.md).
 
 ## Import boundaries
 
@@ -93,22 +97,32 @@ Boolean formulas and uninterpreted first-order logic with equality, not arithmet
 
 ## Revision proposals
 
-`propose_revision(premises, policy=RevisionPolicy(), candidate=None)` accepts at
+`propose_revision(premises, policy=RevisionPolicy(), candidate=None,
+max_withdrawals=1, max_checks=256)` accepts at
 most one new Assertion or Rule. Without a candidate it searches for a repair;
 with one it checks adoption and considers rejection alongside existing targets.
 Candidate IDs must be new within their kind.
 
 `RevisionPolicy(protected, priorities)` uses `Target(kind="assertion"|"rule", id=...)`.
 Protected targets cannot be omitted, including a protected submitted candidate.
-Lower integer priority withdraws first; an omitted priority is zero. Within a
-priority, lower confidence withdraws first across both kinds. Exact equal ranks
-produce a deferral, with no ID tie-break, source policy, or confidence aggregation.
+Lower integer priority withdraws first; an omitted priority is zero. Rank sets
+by their withdrawal-count vector, reading priority layers from the largest
+numeric priority down. Minimize that vector lexicographically before comparing
+confidence: withdrawing two less important records can beat withdrawing one
+more important record. Within one priority layer, fewer withdrawals come first.
+Only equal count vectors compare confidence, layer by layer in that same order,
+with each layer's omitted confidences sorted descending. Smaller vectors win;
+for example `[0.6, 0.5]` beats `[0.9, 0.1]`, despite its larger sum. Confidence
+is never added or aggregated. Exact equal ranks defer without an ID tie-break
+or source policy. With `max_withdrawals=1`, this retains the single-target order.
 Confidence 1.0 is not implicitly protected. Policy targets must exist in the
 submitted state or candidate.
 
 The result includes `decision` (`unchanged`, `proposed`, `deferred`), `reason`,
-`binding`, `original`, `initial`, optional `fixed_base`, `trials`, `changes`, and
-optional `final`. `original` always reports the state before the candidate;
+`binding`, `original`, `initial`, optional `fixed_base`, `trials`, `changes`,
+optional `final`, and `checks_used`. Each trial's `omitted` is a nonempty tuple
+of typed targets, including single-target trials. `original` always reports the
+state before the candidate;
 `initial` reports the attempted state including it. Rejecting a candidate does not
 silently certify an inconsistent original state. A verified rejection that keeps
 an already consistent state returns `unchanged` with `candidate_rejected`.
@@ -118,13 +132,41 @@ an already consistent state returns `unchanged` with `candidate_rejected`.
 from adoption. It never creates a negative claim or sets rule confidence to zero.
 Other owners or remaining rules may still entail the withdrawn claim.
 
-The first search scope is zero or one omission from the attempted set. Candidate
-rejection plus withdrawal of another existing record is outside this scope, as are
-multiple withdrawals. Every trial checks the complete remaining input, not only
-core owners. One SAT trial in the earliest viable rank needs all relevant
-comparisons conclusive; two SAT trials in a rank establish a tie. A relevant
-UNKNOWN blocks selection and descent. Search exhaustion is
-`no_verified_single_revision`, not a claim that no repair exists.
+`max_withdrawals` is an integer at least one, defaulting to one. Set it explicitly
+to two or more to consider larger existing-target sets. Candidate rejection is
+still a standalone omission, ranked alongside existing withdrawals; rejection
+plus existing repair is excluded at every limit. Protected candidates cannot
+be rejected. No zero-cost rejection or novelty preference is inferred.
+
+Every trial checks the complete remaining input, not only core owners, retaining
+the full functional scope. Sets are enumerated lazily in rank order; the search
+does not build all combinations first. Each visited set creates at most two
+successors, so the frontier grows with visited trials rather than the size of
+the full search space. Sorting input records and constructing each rank still
+depend on input size. A proposal requires a unique verified best
+set within this bounded scope. Two SAT sets at the best rank establish a tie.
+A relevant UNKNOWN or an unexamined same-rank competitor after budget exhaustion
+defers even if a SAT trial was found. Inferior sets need not be checked after a
+unique best rank is settled. This is optimality within the configured scope, not
+a guarantee of the best repair with an unlimited number of withdrawals.
+
+`max_checks` is a finite integer at least two, defaulting to 256. It caps all
+`check_consistency` calls made by one proposal: original state, attempted state
+when a candidate exists, fixed base when needed, and revision trials. Without a
+candidate, original and initial share one check; candidate rejection reuses the
+original verdict without charging another. The minimum of two preserves both
+original and attempted diagnostics for candidate requests. `checks_used` reports
+the actual count, which can be smaller than the cap. The default accommodates a
+complete one-or-two withdrawal search over 22 existing records: 253 sets plus
+the original and fixed-base checks, before any early stopping.
+
+Budget exhaustion returns `deferred` with `check_budget_exhausted`; it is separate
+from solver UNKNOWN. `max_rounds` and `max_matches` still renew per individual
+check. The total-check cap is not a time limit and does not bound the cost of a
+single check. Supply per-check limits when needed. Search exhaustion is
+`no_verified_single_revision` at the default scope and `no_verified_revision`
+for larger scopes, never a claim that no repair exists. All scope and budget
+settings are captured in the binding.
 
 ## Applying safely
 
@@ -133,13 +175,15 @@ adopted membership. Only `decision="proposed"` carries changes to apply. A ledge
 is optional, and confidence calculation remains the caller's responsibility.
 
 The immutable `binding` captures `premises`, `policy`, `candidate`, `max_rounds`,
-`max_matches`, and the candidate-inclusive `functional_scope`. Before applying a
-proposal, including one restored from storage, compare the current adopted records
+`max_matches`, `max_withdrawals`, `max_checks`, and the candidate-inclusive
+`functional_scope`. Before applying a proposal, including one restored from
+storage, compare the current adopted records
 and membership with `binding.premises`: IDs, atoms or rule formulas, polarity,
 confidence, source, hard axioms, functional predicates, and retained ground scope.
 Compare the policy's protected targets and priorities, the complete candidate,
-and the intended check limits too. Validate the changes against these inputs and
-recheck the complete proposed state with `check_consistency`; require SAT.
+and the intended search scope and both types of check limits too. Validate the
+changes against these inputs and recheck the complete proposed state with
+`check_consistency`; require SAT.
 
 Preserve and validate `binding.functional_scope` in that state and later checks.
 Do not weaken it or regenerate it from only the remaining Assertions. If restored
