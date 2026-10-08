@@ -41,8 +41,8 @@ HOST_PATH = re.compile(
 #: documents that are not only unopenable but unnamed.
 CITATION = re.compile(r"\b(?:ADR|RFC)s?\b")
 
-#: Documents that exist only in the repository this was extracted from.
-PRIVATE_DOC = re.compile(r"\bbacklog\.md\b|\bdocs/")
+#: Backlog references and document paths that must resolve inside this repository.
+PRIVATE_DOC = re.compile(r"\bbacklog\.md\b|\bdocs/[^\s)\]\"'`#]+")
 
 #: The name this package was published under for one release, before the index
 #: refused it. Deliberately **not** written with ``\b``: an underscore is a word
@@ -153,6 +153,19 @@ def _line_offences(corpus: Corpus, pattern: re.Pattern[str]) -> list[str]:
         for number, line in enumerate(text.splitlines(), 1)
         if pattern.search(line)
     ]
+
+
+def _private_document_offences(corpus: Corpus, root: Path = ROOT) -> list[str]:
+    """Permit actual repository docs, while rejecting missing or outside pointers."""
+    offences = []
+    for name, text in corpus:
+        for number, line in enumerate(text.splitlines(), 1):
+            for match in PRIVATE_DOC.finditer(line):
+                pointer = match.group()
+                target = (root / pointer).resolve()
+                if target.name == "backlog.md" or not target.is_relative_to(root.resolve()) or not target.is_file():
+                    offences.append(f"{name}:{number}")
+    return offences
 
 
 def _prose(source: str) -> list[tuple[int, str]]:
@@ -548,7 +561,7 @@ class TestPublishedDocuments:
         assert not offences, "a citation of a record this package's readers cannot open:\n" + "\n".join(offences)
 
     def test_no_private_document_is_named(self):
-        offences = _line_offences(_markdown_files(changelog=False), PRIVATE_DOC)
+        offences = _private_document_offences(_markdown_files(changelog=False))
         assert not offences, "a document only the host repository holds:\n" + "\n".join(offences)
 
     def test_the_former_name_is_gone(self):
@@ -564,9 +577,25 @@ class TestPublishedDocuments:
         assert _word_offences([("planted.md", "The doppelganger holds it.")])
         assert _line_offences([("planted.md", "See domains/memory.py.")], HOST_PATH)
         assert _line_offences([("planted.md", "Settled in ADR-0123.")], CITATION)
-        assert _line_offences([("planted.md", "Listed in docs/backlog.md.")], PRIVATE_DOC)
+        assert _private_document_offences([("planted.md", "Listed in docs/backlog.md.")])
         assert _line_offences([("planted.md", "`render_doxa` is gone.")], FORMER_NAME)
         assert _markdown_scar_offences([("planted.md", "The revision target (§2.10) is picked.")])
+
+    def test_only_existing_repository_docs_are_allowed(self, tmp_path):
+        guide = tmp_path / "docs" / "guide.md"
+        guide.parent.mkdir()
+        guide.write_text("# Guide\n", encoding="utf-8")
+        pointer = [("README.md", "Read [the guide](docs/guide.md#guide).")]
+        assert not _private_document_offences(pointer, tmp_path)
+        guide.unlink()
+        assert _private_document_offences(pointer, tmp_path)
+        assert _private_document_offences([("README.md", "Read docs/missing.md")], tmp_path)
+        backlog = guide.with_name("backlog.md")
+        backlog.write_text("# Private backlog\n", encoding="utf-8")
+        assert _private_document_offences([("README.md", "Read docs/backlog.md")], tmp_path)
+        outside = tmp_path.parent / "outside.md"
+        outside.write_text("# Outside\n", encoding="utf-8")
+        assert _private_document_offences([("README.md", "Read docs/../../outside.md")], tmp_path)
 
     def test_a_fenced_block_is_not_prose(self):
         """An example calling ``p()`` is code, and its parentheses are meant to be empty."""

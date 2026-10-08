@@ -15,6 +15,7 @@ import pytest
 from endoxa.errors import RuleSyntaxError
 
 README = Path(__file__).resolve().parents[1] / "README.md"
+DOCUMENTS = (README, *sorted((README.parent / "docs").glob("*.md")))
 
 BLOCK = re.compile(r"^```python\n(.*?)^```", re.DOTALL | re.MULTILINE)
 
@@ -30,9 +31,11 @@ def _run(source: str) -> dict[str, object]:
 
 
 class TestTheExampleRuns:
-    def test_every_python_block_executes(self):
-        blocks = _blocks(README.read_text(encoding="utf-8"))
-        assert blocks, "no python block in the README: the check would pass by finding nothing"
+    @pytest.mark.parametrize("path", DOCUMENTS, ids=lambda path: path.name)
+    def test_every_python_block_executes(self, path: Path):
+        blocks = _blocks(path.read_text(encoding="utf-8"))
+        if path == README:
+            assert blocks, "no python block in the README: the check would pass by finding nothing"
         for source in blocks:
             _run(source)
 
